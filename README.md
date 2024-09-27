@@ -1,6 +1,6 @@
 # NeuronFragmentExtractor
 
-FragmentExtractor is a Python-based tool designed to generate training data for machine learning models used in neuron segmentation tasks. This repository focuses on extracting skeletal fragments from neuron segmentations on the scale of either whole-brain or local patch.
+FragmentExtractor is a Python-based tool designed to generate training data for machine learning models used in automated correction of split mistakes in neuron segmentations. This repository focuses on extracting skeletal fragments from neuron segmentations on the scale of either whole-brain or local patch.
 
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 ![Code Style](https://img.shields.io/badge/code%20style-black-black)
