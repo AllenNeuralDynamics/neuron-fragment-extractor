@@ -12,10 +12,9 @@ corresponds to a node in the graph.
 import os
 
 import networkx as nx
-from scipy.spatial import KDTree
-
 from deep_neurographs.utils import graph_util as gutil
 from deep_neurographs.utils import img_util, swc_util
+from scipy.spatial import KDTree
 
 DELETION_RADIUS = 10
 

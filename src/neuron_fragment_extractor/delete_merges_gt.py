@@ -13,7 +13,6 @@ import os
 
 import networkx as nx
 import numpy as np
-
 from deep_neurographs import geometry
 from deep_neurographs.densegraph import DenseGraph
 from deep_neurographs.utils import swc_util, util

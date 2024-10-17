@@ -11,18 +11,12 @@ that have a node within some range of a node from a target swc files.
 
 """
 
-from copy import deepcopy as cp
-from random import sample
-from time import time
-from tqdm import tqdm
-
 import os
-import json
-import numpy as np
-import shutil
+from time import time
 
-from deep_neurographs.utils import swc_util, util
-from deep_neurographs.utils.img_util import get_chunk_labels
+import fastremap
+from deep_neurographs.utils import img_util, swc_util, util
+from tqdm import tqdm
 
 
 def extract_preds():
@@ -53,23 +47,28 @@ def extract_preds():
 
 
 def get_labels(block_id):
+    # Initializations
     labels_path = f"{gcs_path}/label_mask"
     metadata_path = f"{target_swc_dir}/{block_id}/metadata.json"
     origin, shape = util.read_metadata(metadata_path)
-    return get_chunk_labels(labels_path, origin, shape, from_center=False)
+
+    # Open image
+    img = img_util.open_tensorstore(labels_path)
+    img = img_util.read_tensorstore(img, origin, shape, from_center=False)
+    return set(fastremap.unique(img).astype(int))
 
 
 if __name__ == "__main__":
     # Parameters
     bucket_name = "allen-nd-goog"
     dataset = "706301"
-    pred_id = "202405_106997260_633_mean100_dynamic"
+    pred_id = "202410_split_73227862_855_106997260_633_mean80_dynamic"
 
     anisotropy = [0.748, 0.748, 1.0]
-    min_size = 20
+    min_size = 30
 
     # Initialize paths
-    root_dir = f"/home/jupyter/workspace/data/{dataset}"
+    root_dir = f"/home/jupyter/workspace/graphtrace_data/train/{dataset}"
     gcs_path = f"from_google/whole_brain/{dataset}/{pred_id}"
     target_swc_dir = f"{root_dir}/target_swcs/blocks"
     pred_swc_dir = f"{root_dir}/pred_swcs/{pred_id}"
@@ -79,7 +78,9 @@ if __name__ == "__main__":
         "bucket_name": "allen-nd-goog",
         "path": os.path.join(gcs_path, "swcs"),
     }
-    print(f"from_google/whole_brain/{dataset}/{pred_id}/swcs")
+    print(
+        f"from_google/whole_brain/{dataset}/{pred_id}/swcs_4is_10000ic_2000edi"
+    )
 
     # Run extraction
     t0 = time()
