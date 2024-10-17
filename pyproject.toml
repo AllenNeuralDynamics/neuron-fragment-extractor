@@ -17,6 +17,10 @@ readme = "README.md"
 dynamic = ["version"]
 
 dependencies = [
+    "fastremap",
+    "networkx",
+    "scipy",
+    "tqdm",
 ]
 
 [project.optional-dependencies]
