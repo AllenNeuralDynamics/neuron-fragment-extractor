@@ -4,37 +4,37 @@ Created on Sat November 04 15:30:00 2023
 @author: Anna Grim
 @email: anna.grim@alleninstitute.org
 
-Class of graphs built from swc files where each entry in the swc file
-corresponds to a node in the graph.
+Class of graphs built from swc files where each entry corresponds to a node in
+the graph.
 
 """
 
-import os
-
-import networkx as nx
-from deep_neurographs.utils import graph_util as gutil
-from deep_neurographs.utils import img_util, swc_util
 from scipy.spatial import KDTree
 
-DELETION_RADIUS = 10
+import networkx as nx
+import os
+
+from neuron_fragment_extractor.utils import swc_util, util
 
 
-class DenseGraph:
+class SkeletonGraph(nx.Graph):
     """
-    Class of graphs built from swc files. Each swc file is stored as a
+    Class of graphs built from SWC files. Each SWC file is stored as a
     distinct graph and each node in this graph.
 
     """
 
-    def __init__(self, swc_paths, img_patch_origin=None, img_patch_shape=None):
+    def __init__(
+        self,
+        anisotropy=(1.0, 1.0, 1.0),
+        img_patch_origin=None,
+        img_patch_shape=None,
+    ):
         """
-        Constructs a DenseGraph object from a directory of swc files.
+        Constructs a DenseGraph object from a directory of SWC files.
 
         Parameters
         ----------
-        swc_paths : list[str]
-            List of paths to swc files which are used to construct a hash
-            table in which the entries are filename-graph pairs.
         ...
 
         Returns
@@ -42,58 +42,73 @@ class DenseGraph:
         None
 
         """
-        self.bbox = img_util.get_bbox(img_patch_origin, img_patch_shape)
-        self.init_graphs(swc_paths)
-        self.init_kdtree()
+        # Call parent class
+        super(SkeletonGraph, self).__init__()
 
-    def init_graphs(self, paths):
+        # Instance attributes
+        self.anisotropy = anisotropy
+        self.img_bbox = util.init_bbox(img_patch_origin, img_patch_shape)
+        self.swc_reader = swc_util.Reader()
+        self.xyz_to_node = dict()
+
+    # --- Constructor Helpers ---
+    def load_swcs(self, swc_pointer):
         """
-        Initializes graphs by reading swc files in "paths". Graphs are
-        stored in a hash table where the entries are filename-graph pairs.
+        Initializes graphs by reading SWC files at "swc_paths" and loading
+        contents into graph structure. Note that SWC files are assumed to be
+        in physical coordiantes.=
 
         Parameters
         ----------
-        paths : list[str]
-            List of paths to swc files that are used to construct a dictionary
-            in which the items are filename-graph pairs.
+        swc_pointer : Any
+            Object that points to SWC files to be read, see "swc_util.py"
+            documentation for details.
 
         Returns
         -------
         None
 
         """
-        self.graphs = dict()
-        self.xyz_to_swc = dict()
-        swc_dicts = swc_util.Reader().load(paths)
-        for i, swc_dict in enumerate(swc_dicts):
-            # Build graph
-            swc_id = swc_dict["swc_id"]
-            graph, _ = swc_util.to_graph(swc_dict, set_attrs=True)
-            if self.bbox:
-                graph = gutil.trim_branches(graph, self.bbox)
+        for swc_dict in self.swc_reader.load(swc_pointer):
+            graph = swc_util.to_graph(swc_dict, set_attrs=True)
+            self.clip_branches(graph)
+            self.add_graph(graph)
 
-            # Store graph
-            self.store_xyz_swc(graph, swc_id)
-            self.graphs[swc_id] = graph
-
-    def store_xyz_swc(self, graph, swc_id):
+    def clip_branches(self, graph):
         """
-        Stores (xyz, swc_id) as an item in the dictionary "self.xyz_to_swc".
+        Deletes all nodes from "graph" that are not contained in the bounding
+        box specified by "self.img_bbox".
 
         Parameters
         ----------
-        graph : netowrkx.Graph
-            Graph to parsed.
-        swc_id : str
-            swc_id corresponding to "graph".
+        graph : networkx.Graph
+            Graph to be searched
 
         Returns
         -------
         None
 
         """
-        for i in graph.nodes:
-            self.xyz_to_swc[tuple(graph.nodes[i]["xyz"])] = swc_id
+        if self.img_bbox:
+            delete_nodes = set()
+            for i in graph.nodes:
+                voxel = util.to_voxels(graph.nodes[i]["xyz"], self.anisotropy)
+                if not util.is_contained(self.img_bbox, voxel):
+                    delete_nodes.add(i)
+            graph.remove_nodes_from(delete_nodes)
+
+    def add_graph(self, graph):
+        # Add nodes
+        old_to_new = dict()
+        for old_id, data in graph.nodes(data=True):
+            new_id = self.number_of_nodes() + 1
+            old_to_new[old_id] = new_id
+            self.add_node(new_id, **data)
+            self.xyz_to_node[tuple(data["xyz"])] = new_id
+
+        # Add edges
+        for i, j in graph.edges:
+            self.add_edge(old_to_new[i], old_to_new[j])
 
     def init_kdtree(self):
         """
@@ -111,6 +126,7 @@ class DenseGraph:
         """
         self.kdtree = KDTree(list(self.xyz_to_swc.keys()))
 
+    # --- General Routines ---
     def get_projection(self, xyz):
         """
         Projects "xyz" onto "self by finding the closest point.
