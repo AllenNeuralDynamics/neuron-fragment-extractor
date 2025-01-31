@@ -22,8 +22,8 @@ from tqdm import tqdm
 def extract_preds():
     # Read predicted swc files from cloud
     print("Loading Fragments...")
-    reader = swc_util.Reader(anisotropy, min_size)
-    swc_dicts = reader.load(fragments_pointer)
+    swc_reader = swc_util.Reader(anisotropy, min_size)
+    swc_dicts = swc_reader.load(fragments_pointer)
     print("# Fragments:", len(swc_dicts))
 
     # Main
@@ -61,26 +61,23 @@ def get_labels(block_id):
 if __name__ == "__main__":
     # Parameters
     bucket_name = "allen-nd-goog"
-    dataset = "706301"
-    pred_id = "202410_split_73227862_855_106997260_633_mean80_dynamic"
+    dataset = "653980"
+    pred_id = "202412_73227862_855_mean80_mask40_dynamic"
 
-    anisotropy = [0.748, 0.748, 1.0]
+    anisotropy = (0.748, 0.748, 1.0)
     min_size = 30
 
     # Initialize paths
-    root_dir = f"/home/jupyter/workspace/graphtrace_data/train/{dataset}"
-    gcs_path = f"from_google/whole_brain/{dataset}/{pred_id}"
+    root_dir = f"/home/jupyter/workspace/data/graphtrace/train/{dataset}"
+    gcs_path = f"from_google/whole_brain/{dataset}_b0/{pred_id}"
     target_swc_dir = f"{root_dir}/target_swcs/blocks"
-    pred_swc_dir = f"{root_dir}/pred_swcs/{pred_id}"
+    pred_swc_dir = f"{root_dir}/pred_swcs/{pred_id}/block_000"
     util.mkdir(pred_swc_dir, delete=True)
 
     fragments_pointer = {
         "bucket_name": "allen-nd-goog",
-        "path": os.path.join(gcs_path, "swcs"),
+        "path": os.path.join(gcs_path, "swcs_4is_10kic"),
     }
-    print(
-        f"from_google/whole_brain/{dataset}/{pred_id}/swcs_4is_10000ic_2000edi"
-    )
 
     # Run extraction
     t0 = time()
