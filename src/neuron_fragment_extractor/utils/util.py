@@ -10,6 +10,8 @@ Miscellaneous helper routines.
 """
 
 import json
+import os
+import shutil
 
 
 # --- io utils ---
@@ -153,4 +155,43 @@ def to_voxels(xyz, anisotropy):
     return tuple(voxel[::-1])
 
 
-# --- graph visualization ---
+# --- miscellaneous ---
+def mkdir(path, delete=False):
+    """
+    Creates a directory at "path".
+
+    Parameters
+    ----------
+    path : str
+        Path of directory to be created.
+    delete : bool, optional
+        Indication of whether to delete directory at path if it already
+        exists. The default is False.
+
+    Returns
+    -------
+    None
+
+    """
+    if delete:
+        rmdir(path)
+    if not os.path.exists(path):
+        os.mkdir(path)
+
+
+def rmdir(path):
+    """
+    Removes directory and all subdirectories located at "path".
+
+    Parameters
+    ----------
+    path : str
+        Path to directory and subdirectories to be deleted.
+
+    Returns
+    -------
+    None
+
+    """
+    if os.path.exists(path):
+        shutil.rmtree(path)

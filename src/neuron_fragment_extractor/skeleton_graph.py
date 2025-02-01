@@ -145,62 +145,63 @@ class SkeletonGraph(nx.Graph):
         _, idx = self.kdtree.query(xyz, k=1)
         return tuple(self.kdtree.data[idx])
 
-    def save(self, output_dir):
+    # --- Writer ---
+    def write(self, output_dir):
         """
-        Saves "self" to an swc file.
+        Writes graph structure to SWC files, where each SWC file corresponds
+        to a connected component.
 
         Parameters
         ----------
         output_dir : str
-            Path to directory that swc files are written to.
+            Path to directory that SWC files are written to.
 
         Returns
         -------
         None
 
         """
-        for swc_id, graph in self.graphs.items():
-            cnt = 0
-            for component in nx.connected_components(graph):
-                entry_list = self.make_entries(graph, component)
+        util.mkdir(output_dir, delete=True)
+        for nodes in nx.connected_components(self):
+            if len(nodes) > 10:
+                cnt = 0
+                entry_list, swc_id = self.make_entries(nodes)
                 path = os.path.join(output_dir, f"{swc_id}.swc")
                 while os.path.exists(path):
                     path = os.path.join(output_dir, f"{swc_id}.{cnt}.swc")
                     cnt += 1
                 swc_util.write(path, entry_list)
 
-    def make_entries(self, graph, component):
+    def make_entries(self, nodes):
         """
-        Makes swc entries corresponding to nodes in "component".
+        Makes SWC entries for the given nodes.
 
         Parameters
         ----------
-        graph : networkx.Graph
-            Graph that "component" is a connected component of.
-        component : set
-            Connected component of "graph".
+        nodes : Set[int]
+            Nodes in a connected component.
 
         Returns
         -------
-        entry_list
-            List of swc entries generated from nodes in "component".
+        List[str]
+            Entries to be written to an SWC file.
 
         """
+        entry_list = list()
         node_to_idx = dict()
-        entry_list = []
-        for i, j in nx.dfs_edges(graph.subgraph(component)):
-            # Initialize
+        for i, j in nx.dfs_edges(self.subgraph(nodes)):
+            # Check if list is empty
             if len(entry_list) == 0:
                 node_to_idx[i] = 1
-                x, y, z = tuple(graph.nodes[i]["xyz"])
-                r = graph.nodes[i]["radius"]
+                x, y, z = tuple(self.nodes[i]["xyz"])
+                r = self.nodes[i]["radius"]
                 entry_list.append(f"1 2 {x} {y} {z} {r} -1")
 
             # Create entry
             node_to_idx[j] = len(entry_list) + 1
-            x, y, z = tuple(graph.nodes[j]["xyz"])
-            r = graph.nodes[j]["radius"]
+            x, y, z = tuple(self.nodes[j]["xyz"])
+            r = self.nodes[j]["radius"]
             entry_list.append(
                 f"{node_to_idx[j]} 2 {x} {y} {z} {r} {node_to_idx[i]}"
             )
-        return entry_list
+        return entry_list, self.nodes[i]["swc_id"]

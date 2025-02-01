@@ -670,5 +670,6 @@ def add_attributes(graph, swc_dict):
         attrs[node] = {
             "xyz": swc_dict["xyz"][idx],
             "radius": swc_dict["radius"][idx],
+            "swc_id": swc_dict["swc_id"],
         }
     nx.set_node_attributes(graph, attrs)
