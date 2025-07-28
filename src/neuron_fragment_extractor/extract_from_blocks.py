@@ -5,82 +5,130 @@ Created on Wed June 5 16:00:00 2023
 @email: anna.grim@alleninstitute.org
 
 
-Given a whole brain predicted segmentation in the form of a directory of swc
-files and a set of target swc files, this code extracts predicted swc files
-that have a node within some range of a node from a target swc files.
+Given a GCS directory containing ground truth segmentation blocks, this code
+extracts SWC files of segments from predicted segmentations that are contained
+in these blocks.
 
 """
 
-import os
+from deep_neurographs.utils.img_util import TensorStoreReader
 from time import time
-
-import fastremap
-from deep_neurographs.utils import img_util, swc_util, util
 from tqdm import tqdm
 
+import fastremap
+import os
 
-def extract_preds():
-    # Read predicted swc files from cloud
-    print("Loading Fragments...")
-    swc_reader = swc_util.Reader(anisotropy, min_size)
-    swc_dicts = swc_reader.load(fragments_pointer)
-    print("# Fragments:", len(swc_dicts))
-
-    # Main
-    print("\nGenerating Neuron Reconstruction Datasets...")
-    for block_id in util.list_subdirs(target_swc_dir, keyword="block"):
-        # Initializations
-        labels = get_labels(block_id)
-        util.mkdir(os.path.join(pred_swc_dir, block_id))
-
-        # Parse swc files
-        cnt = 0
-        for swc_dict in tqdm(swc_dicts, desc=block_id):
-            swc_id = int(swc_dict["swc_id"])
-            if swc_id in labels:
-                path = f"{pred_swc_dir}/{block_id}/{swc_id}.swc"
-                graph, _ = swc_util.to_graph(swc_dict, set_attrs=True)
-                swc_util.write(path, graph)
-                cnt += 1
-        print("# Fragments Found:", cnt)
-        print("")
+from neuron_fragment_extractor.utils import swc_util, util
 
 
-def get_labels(block_id):
+def main():
     # Initializations
-    labels_path = f"{gcs_path}/label_mask"
-    metadata_path = f"{target_swc_dir}/{block_id}/metadata.json"
-    origin, shape = util.read_metadata(metadata_path)
+    segmentation_dirs = util.list_gcs_subdirectories(
+        bucket_name, "from_google/whole_brain/"
+    )
+    swc_reader = swc_util.Reader(anisotropy, min_size)
 
-    # Open image
-    img = img_util.open_tensorstore(labels_path)
-    img = img_util.read_tensorstore(img, origin, shape, from_center=False)
-    return set(fastremap.unique(img).astype(int))
+    # Iterate over groundtruth blocks
+    gt_subdirs= util.list_gcs_subdirectories(bucket_name, gt_blocks_prefix)
+    for gt_subdir in gt_subdirs:
+        # Extract metadata
+        metadata_path = os.path.join(gt_subdir, "metadata.json")
+        metadata = util.read_json_from_gcs(bucket_name, metadata_path)
+        brain_id = get_brain_id(metadata)
+        block_id = gt_subdir.split("/")[-2]
+        print(brain_id, block_id)
+
+        # Iterate over label masks
+        for segmentation_dir in find_matching_dirs(segmentation_dirs, brain_id):
+            # Initialize output directory
+            segmentation_id = segmentation_dir.split("/")[-2]
+            swc_output_dir = get_swc_output_dir(brain_id, block_id, segmentation_id)
+            print("   Output Directory:", swc_output_dir)
+
+            # Extract labels from label_mask
+            segment_ids = get_segment_ids(segmentation_dir, metadata)
+            print("   # Labels Found:", len(segment_ids))
+
+            # Search fragments for matching labels
+            swc_dicts = get_swc_dicts(swc_reader, brain_id, segmentation_dir)
+            while swc_dicts:
+                swc_dict = swc_dicts.pop()
+                segment_id = swc_util.get_segment_id(swc_dict["swc_name"])
+                if segment_id in segment_ids:
+                    path = os.path.join(swc_output_dir, swc_dict["swc_name"])
+                    swc_util.write_swc(swc_dict, path)
+            print("   # Fragments Found:", util.count_files(swc_output_dir))
+            print("")
+
+
+def get_swc_output_dir(brain_id, block_id, segmentation_id):
+    path = f"{output_dir}/{brain_id}/pred_swcs/{segmentation_id}/{block_id}"
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def get_brain_id(metadata):
+    img_dirname = metadata["image_url"].split("/")[3]
+    return img_dirname.split("_")[1]
+
+
+def find_matching_dirs(segmentation_dirs, target_brain_id):
+    # Find matching directory
+    matching_dir = None
+    for segmentation_dir in segmentation_dirs:
+        brain_id = segmentation_dir.split("/")[-2]
+        if brain_id == target_brain_id:
+            matching_dir = segmentation_dir
+            break
+
+    # Get matching segmentation directories with label mask
+    if matching_dir:
+        dirs_with_label_mask = list()
+        for d in util.list_gcs_subdirectories(bucket_name, matching_dir):
+            label_mask_path = os.path.join(d, "label_mask/")
+            if util.gcs_directory_exists(bucket_name, label_mask_path):
+                dirs_with_label_mask.append(d)
+        return dirs_with_label_mask
+    else:
+        return list()
+
+
+def find_swc_dirname(segmentation_dir):
+    for subdir in util.list_gcs_subdirectories(bucket_name, segmentation_dir):
+        dirname = subdir.split("/")[4]
+        if "swc" in dirname:
+            return dirname
+    return None
+
+
+def get_segment_ids(segmentation_dir, metadata):
+    # Initializations
+    label_mask_path = os.path.join(segmentation_dir, "label_mask")
+    label_mask_reader = TensorStoreReader(label_mask_path)
+    origin = metadata["chunk_origin"][::-1]
+    shape = metadata["chunk_shape"][::-1]
+
+    # Read labels
+    patch = label_mask_reader.read(origin, shape, from_center=False)
+    return set(fastremap.unique(patch).astype(int))
+
+
+def get_swc_dicts(swc_reader, brain_id, segmentation_dir):
+    swc_dirname = find_swc_dirname(segmentation_dir)
+    swc_dir = os.path.join(segmentation_dir, swc_dirname)
+    fragments_pointer = {"bucket_name": bucket_name, "path": swc_dir}
+    return swc_reader.read(fragments_pointer)
 
 
 if __name__ == "__main__":
     # Parameters
-    bucket_name = "allen-nd-goog"
-    dataset = "653980"
-    pred_id = "202412_73227862_855_mean80_mask40_dynamic"
-
     anisotropy = (0.748, 0.748, 1.0)
     min_size = 30
 
-    # Initialize paths
-    root_dir = f"/home/jupyter/workspace/data/graphtrace/train/{dataset}"
-    gcs_path = f"from_google/whole_brain/{dataset}_b0/{pred_id}"
-    target_swc_dir = f"{root_dir}/target_swcs/blocks"
-    pred_swc_dir = f"{root_dir}/pred_swcs/{pred_id}/block_000"
-    util.mkdir(pred_swc_dir, delete=True)
+    # Paths
+    bucket_name = "allen-nd-goog"
+    gt_blocks_prefix = "from_aind/training-data_2025-06-10/blocks/"
+    output_dir = "/home/jupyter/data/split_proofreading"
 
-    fragments_pointer = {
-        "bucket_name": "allen-nd-goog",
-        "path": os.path.join(gcs_path, "swcs_4is_10kic"),
-    }
-
-    # Run extraction
-    t0 = time()
-    extract_preds()
-    t, unit = util.time_writer(time() - t0)
-    print("\nRuntime: {} {}\n".format(t, unit))
+    # Run
+    main()
