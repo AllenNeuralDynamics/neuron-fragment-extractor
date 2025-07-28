@@ -600,9 +600,6 @@ def write_swc(swc_dict, output_path):
         # Write entries
         node_to_idx = dict()
         for i, j in nx.dfs_edges(graph):
-            # Set node ID
-            node = len(node_to_idx) + 1
-
             # Special Case: Root
             if len(node_to_idx) == 0:
                 parent = -1
@@ -612,6 +609,7 @@ def write_swc(swc_dict, output_path):
                 f.write(f"\n1 2 {x} {y} {z} {r} {parent}")
 
             # General Case
+            node = len(node_to_idx) + 1
             parent = node_to_idx[i]
             node_to_idx[j] = node
             x, y, z = tuple(graph.graph["xyz"][j])

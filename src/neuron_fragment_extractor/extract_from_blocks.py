@@ -20,6 +20,8 @@ import os
 
 from neuron_fragment_extractor.utils import swc_util, util
 
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/home/jupyter/gcs-token.json"
+
 
 def main():
     # Initializations
@@ -43,11 +45,11 @@ def main():
             # Initialize output directory
             segmentation_id = segmentation_dir.split("/")[-2]
             swc_output_dir = get_swc_output_dir(brain_id, block_id, segmentation_id)
-            print("   Output Directory:", swc_output_dir)
+            print("Output Directory:", swc_output_dir)
 
             # Extract labels from label_mask
             segment_ids = get_segment_ids(segmentation_dir, metadata)
-            print("   # Labels Found:", len(segment_ids))
+            print("# Labels Found:", len(segment_ids))
 
             # Search fragments for matching labels
             swc_dicts = get_swc_dicts(swc_reader, brain_id, segmentation_dir)
@@ -55,21 +57,10 @@ def main():
                 swc_dict = swc_dicts.pop()
                 segment_id = swc_util.get_segment_id(swc_dict["swc_name"])
                 if segment_id in segment_ids:
-                    path = os.path.join(swc_output_dir, swc_dict["swc_name"])
+                    path = os.path.join(swc_output_dir, swc_dict["swc_name"] + ".swc")
                     swc_util.write_swc(swc_dict, path)
-            print("   # Fragments Found:", util.count_files(swc_output_dir))
+            print("# Fragments Found:", util.count_files(swc_output_dir))
             print("")
-
-
-def get_swc_output_dir(brain_id, block_id, segmentation_id):
-    path = f"{output_dir}/{brain_id}/pred_swcs/{segmentation_id}/{block_id}"
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def get_brain_id(metadata):
-    img_dirname = metadata["image_url"].split("/")[3]
-    return img_dirname.split("_")[1]
 
 
 def find_matching_dirs(segmentation_dirs, target_brain_id):
@@ -101,6 +92,11 @@ def find_swc_dirname(segmentation_dir):
     return None
 
 
+def get_brain_id(metadata):
+    img_dirname = metadata["image_url"].split("/")[3]
+    return img_dirname.split("_")[1]
+
+
 def get_segment_ids(segmentation_dir, metadata):
     # Initializations
     label_mask_path = os.path.join(segmentation_dir, "label_mask")
@@ -109,7 +105,8 @@ def get_segment_ids(segmentation_dir, metadata):
     shape = metadata["chunk_shape"][::-1]
 
     # Read labels
-    patch = label_mask_reader.read(origin, shape, from_center=False)
+    center = tuple([o + s // 2 for o, s in zip(origin, shape)])
+    patch = label_mask_reader.read(center, shape)
     return set(fastremap.unique(patch).astype(int))
 
 
@@ -120,10 +117,16 @@ def get_swc_dicts(swc_reader, brain_id, segmentation_dir):
     return swc_reader.read(fragments_pointer)
 
 
+def get_swc_output_dir(brain_id, block_id, segmentation_id):
+    path = f"{output_dir}/{brain_id}/pred_swcs/{segmentation_id}/{block_id}"
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 if __name__ == "__main__":
     # Parameters
     anisotropy = (0.748, 0.748, 1.0)
-    min_size = 30
+    min_size = 35
 
     # Paths
     bucket_name = "allen-nd-goog"
