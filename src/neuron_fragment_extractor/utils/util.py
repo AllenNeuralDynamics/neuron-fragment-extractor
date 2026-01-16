@@ -40,24 +40,26 @@ def gcs_directory_exists(bucket_name, prefix):
     return len(blobs) > 0
 
 
-def list_gcs_filenames(gcs_dict, extension):
+def list_gcs_filenames(bucket_name, prefix, extension=""):
     """
     Lists all files in a GCS bucket with the given extension.
 
     Parameters
     ----------
-    gcs_dict : dict
-        ...
-    extension : str
-        File extension of filenames to be listed.
+    bucket_name : str
+        Name of bucket to be searched.
+    prefix : str
+        Path to location within bucket to be searched.
+    extension : str, optional
+        File extension of filenames to be listed. Default is an empty string.
 
     Returns
     -------
     List[str]
-        Filenames stored at "cloud" path with the given extension.
+        Filenames stored at the GCS path with the given extension.
     """
-    bucket = storage.Client().bucket(gcs_dict["bucket_name"])
-    blobs = bucket.list_blobs(prefix=gcs_dict["path"])
+    bucket = storage.Client().bucket(bucket_name)
+    blobs = bucket.list_blobs(prefix=prefix)
     return [blob.name for blob in blobs if extension in blob.name]
 
 
