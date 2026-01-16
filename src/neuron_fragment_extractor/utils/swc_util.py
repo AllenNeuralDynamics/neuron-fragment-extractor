@@ -4,9 +4,18 @@ Created on Wed June 5 16:00:00 2023
 @author: Anna Grim
 @email: anna.grim@alleninstitute.org
 
+Routines for working with SWC files. An SWC file is a text-based file format
+used to represent the directed graphical structure of a neuron. It contains a
+series of nodes such that each has the following attributes:
+    "id" (int): node ID
+    "type" (int): node type (e.g. soma, axon, dendrite)
+    "x" (float): x coordinate
+    "y" (float): y coordinate
+    "z" (float): z coordinate
+    "pid" (int): node ID of parent
 
-Routines for working with swc files.
-
+Note: Each uncommented line in an SWC file corresponds to a node and contains
+      these attributes in the same order.
 """
 
 from collections import deque
@@ -16,7 +25,7 @@ from concurrent.futures import (
     as_completed,
 )
 from google.cloud import storage
-from io import BytesIO
+from io import BytesIO, StringIO
 from tqdm import tqdm
 from zipfile import ZipFile
 
@@ -25,13 +34,13 @@ import networkx as nx
 import numpy as np
 import os
 
-from neuron_fragment_extractor.utils import util
+from neuron_proofreader.utils import util
 
 
 class Reader:
     """
     Class that reads SWC files stored in a (1) local directory, (2) local ZIP
-    archive, or (3) GCS directory of ZIP archives.
+    archive, or (3) GCS directory, (4) GCS directory of ZIP archives.
     """
 
     def __init__(self, anisotropy=(1.0, 1.0, 1.0), min_size=0):
@@ -42,14 +51,10 @@ class Reader:
         ----------
         anisotropy : Tuple[float], optional
             Image to physical coordinates scaling factors to account for the
-            anisotropy of the microscope. The default is [1.0, 1.0, 1.0].
+            anisotropy of the microscope. Default is [1.0, 1.0, 1.0].
         min_size : int, optional
             Threshold on the number nodes in SWC files that are parsed and
-            returned. The default is 0.
-
-        Returns
-        -------
-        None
+            returned. Default is 0.
         """
         self.anisotropy = anisotropy
         self.min_size = min_size
@@ -60,18 +65,19 @@ class Reader:
 
         Parameters
         ----------
-        swc_pointer : dict, list, str
+        swc_pointer : str or List[str]
             Object that points to SWC files to be read, must be one of:
-                - swc_dir (str): Path to directory containing SWC files.
-                - swc_path (str): Path to single SWC file.
-                - swc_path_list (List[str]): List of paths to SWC files.
-                - swc_zip (str): Path to a ZIP archive containing SWC files.
-                - gcs_dict (dict): Dictionary that contains the keys
-                  "bucket_name" and "path" to read from a GCS bucket.
+                - file_path: Path to single SWC file
+                - dir_path: Path to local directory with SWC files
+                - zip_path: Path to local ZIP with SWC files
+                - zip_dir_path: Path to local directory of ZIPs with SWC files
+                - gcs_dir_path: Path to GCS directory with SWC files
+                - gcs_zip_dir_path: Path to GCS directory with ZIPs of SWC files
+                - path_list: List of paths to local SWC files
 
         Returns
         -------
-        List[dict]
+        Deque[dict]
             List of dictionaries whose keys and values are the attribute names
             and values from the SWC files. Each dictionary contains the
             following items:
@@ -82,10 +88,6 @@ class Reader:
                 - "soma_nodes": nodes with soma type.
                 - "swc_name": name of SWC file, minus the ".swc".
         """
-        # Dictionary with GCS specs
-        if isinstance(swc_pointer, dict):
-            return self.read_from_gcs(swc_pointer)
-
         # List of paths to SWC files
         if isinstance(swc_pointer, list):
             return self.read_from_paths(swc_pointer)
@@ -106,17 +108,26 @@ class Reader:
 
         # Path to...
         if isinstance(swc_pointer, str):
+            # Single SWC file in GCS
+            if util.is_gcs_path(swc_pointer) and swc_pointer.endswith(".swc"):
+                bucket_name, path = util.parse_cloud_path(swc_pointer)
+                return [self.read_from_gcs_swc(bucket_name, path)]
+
+            # GCS directory
+            if util.is_gcs_path(swc_pointer):
+                return self.read_from_gcs(swc_pointer)
+
             # ZIP archive with SWC files
-            if ".zip" in swc_pointer:
+            if swc_pointer.endswith(".zip"):
                 return self.read_from_zip(swc_pointer)
 
-            # Path to single SWC file
-            if ".swc" in swc_pointer:
+            # Single SWC file
+            if swc_pointer.endswith(".swc"):
                 return self.read_from_path(swc_pointer)
 
-            raise Exception(f"Path is invalid - {swc_pointer}")
+            raise Exception(f"Path is invalid {swc_pointer}")
 
-        raise Exception(f"SWC Pointer is invalid - {swc_pointer}")
+        raise Exception(f"SWC Pointer is invalid {swc_pointer}")
 
     # --- Read subroutines ---
     def read_from_paths(self, swc_paths):
@@ -258,35 +269,34 @@ class Reader:
         else:
             return False
 
-    def read_from_gcs(self, gcs_dict):
+    def read_from_gcs(self, gcs_path):
         """
         Reads SWC files stored in a GCS bucket.
 
         Parameters
         ----------
-        gcs_dict : dict
-            Dictionary with the keys "bucket_name" and "path" that specify
-            where the SWC files are located in a GCS bucket.
+        gcs_path : str
+            Path to SWC files located in a GCS bucket.
 
         Returns
         -------
         Dequeue[dict]
             List of dictionaries whose keys and values are the attribute
             names and values from an SWC file.
-
         """
         # List filenames
-        swc_paths = util.list_gcs_filenames(gcs_dict, ".swc")
-        zip_paths = util.list_gcs_filenames(gcs_dict, ".zip")
+        bucket_name, prefix = util.parse_cloud_path(gcs_path)
+        swc_paths = util.list_gcs_filenames(bucket_name, prefix, ".swc")
+        zip_paths = util.list_gcs_filenames(bucket_name, prefix, ".zip")
 
         # Call reader
         if len(swc_paths) > 0:
-            return self.read_from_gcs_swcs(gcs_dict["bucket_name"], swc_paths)
+            return self.read_from_gcs_swcs(bucket_name, swc_paths)
         if len(zip_paths) > 0:
-            return self.read_from_gcs_zips(gcs_dict["bucket_name"], zip_paths)
+            return self.read_from_gcs_zips(bucket_name, zip_paths)
 
         # Error
-        raise Exception(f"GCS Pointer is invalid -{gcs_dict}-")
+        raise Exception(f"GCS Pointer is invalid {gcs_path}")
 
     def read_from_gcs_swcs(self, bucket_name, swc_paths):
         """
@@ -294,16 +304,16 @@ class Reader:
 
         Parameters
         ----------
-        gcs_dict : dict
-            Dictionary with the keys "bucket_name" and "path" that specify
-            where the SWC files are located in a GCS bucket.
+        bucket_name : str
+            Name of GCS bucket containing SWC files.
+        swc_paths : List[str]
+            Paths to SWC files.
 
         Returns
         -------
-        Dequeue[dict]
+        swc_dicts : Dequeue[dict]
             List of dictionaries whose keys and values are the attribute
             names and values from an SWC file.
-
         """
         pbar = tqdm(total=len(swc_paths), desc="Read SWCs")
         with ThreadPoolExecutor() as executor:
@@ -329,16 +339,16 @@ class Reader:
 
         Parameters
         ----------
-        gcs_dict : dict
-            Dictionary with the keys "bucket_name" and "path" that specify
-            where a single SWC file is located in a GCS bucket.
+        bucket_name : str
+            Name of GCS bucket containing SWC files.
+        swc_path : str
+            Path to SWC file to be read.
 
         Returns
         -------
-        dict
+        swc_dict : dict
             Dictionaries whose keys and values are the attribute names and
             values from an SWC file.
-
         """
         # Initialize cloud reader
         client = storage.Client()
@@ -360,9 +370,8 @@ class Reader:
 
         Parameters
         ----------
-        gcs_dict : dict
-            Dictionary with the keys "bucket_name" and "path" that specify
-            where the ZIP archives are located in a GCS bucket.
+        bucket_name : str
+            Name of GCS bucket containing SWC files.
         zip_paths : List[str]
             Paths to ZIP archives in a GCS bucket.
 
@@ -404,8 +413,12 @@ class Reader:
 
         Parameters
         ----------
-        zip_content : bytes
-            Content of a ZIP archive.
+        bucket_name : str
+            Name of GCS bucket containing SWC files.
+        zip_path : str
+            Path to ZIP archive to be read.
+        filenames : None or List[str], optional
+            Filenames to be read if provided. Default is None.
 
         Returns
         -------
@@ -485,7 +498,7 @@ class Reader:
         Returns
         -------
         content : List[str]
-            A list of strings representing the lines of text starting from the
+            List of strings representing the lines of text starting from the
             line immediately after the last commented line.
         offset : List[float]
             Offset used to shift coordinates.
@@ -494,7 +507,7 @@ class Reader:
         for i, line in enumerate(content):
             if line.startswith("# OFFSET"):
                 offset = self.read_xyz(line.split()[2:5])
-            if not line.startswith("#"):
+            if not line.startswith("#") and len(line) > 0:
                 return content[i:], offset
 
     def read_xyz(self, xyz_str, offset=(0, 0, 0)):
@@ -515,6 +528,67 @@ class Reader:
         """
         iterator = zip(self.anisotropy, xyz_str, offset)
         return [a * (float(s) + o) for a, s, o in iterator]
+
+
+# --- Write ---
+def write_points(
+    zip_path, points, color=None, prefix="", radius=10, write_mode="w"
+):
+    """
+    Writes a list of 3D points to individual SWC files in the specified
+    directory.
+
+    Parameters
+    -----------
+    zip_path : str
+        Path to ZIP archive where the SWC files will be saved.
+    points : List[Tuple[float]]
+        List of 3D points to be saved.
+    color : str, optional
+        Color to associate with the points in the SWC files. Default is
+        None.
+    prefix : str, optional
+        String that is prefixed to the filenames of the SWC files. Default is
+        an empty string. Default is an empty string.
+    radius : float, optional
+        Radius to be used in SWC file. Default is 10.
+    """
+    zip_writer = ZipFile(zip_path, write_mode)
+    for i, xyz in enumerate(points):
+        filename = prefix + str(i + 1) + ".swc"
+        to_zipped_point(zip_writer, filename, xyz, color=color, radius=radius)
+
+
+def to_zipped_point(zip_writer, filename, xyz, color=None, radius=5):
+    """
+    Writes a point to an SWC file format, which is then stored in a ZIP
+    archive.
+
+    Parameters
+    ----------
+    zip_writer : zipfile.ZipFile
+        ZipFile object that will store the generated SWC file.
+    filename : str
+        Filename of SWC file.
+    xyz : ArrayLike
+        Point to be written to SWC file.
+    color : str, optional
+        Color of nodes. Default is None.
+    radius : float, optional
+        Radius of point. Default is 5um.
+    """
+    with StringIO() as text_buffer:
+        # Preamble
+        if color:
+            text_buffer.write("# COLOR " + color)
+        text_buffer.write("\n" + "# id, type, z, y, x, r, pid")
+
+        # Write entry
+        x, y, z = tuple(xyz)
+        text_buffer.write("\n" + f"1 5 {x} {y} {z} {radius} -1")
+
+        # Finish
+        zip_writer.writestr(filename, text_buffer.getvalue())
 
 
 # --- Helpers ---
