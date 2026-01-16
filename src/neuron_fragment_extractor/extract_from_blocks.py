@@ -28,7 +28,6 @@ def main():
     segmentation_dirs = util.list_gcs_subdirectories(
         bucket_name, "from_google/whole_brain/"
     )
-    swc_reader = swc_util.Reader(anisotropy, min_size)
 
     # Iterate over groundtruth blocks
     gt_subdirs= util.list_gcs_subdirectories(bucket_name, gt_blocks_prefix)
@@ -41,6 +40,8 @@ def main():
         print(brain_id, block_id)
 
         # Iterate over label masks
+        min_size = 60 if block_id in ["block_011"] else 35  
+        swc_reader = swc_util.Reader(anisotropy, min_size)
         for segmentation_dir in find_matching_dirs(segmentation_dirs, brain_id):
             # Initialize output directory
             segmentation_id = segmentation_dir.split("/")[-2]
@@ -63,6 +64,7 @@ def main():
             print("")
 
 
+# --- Helpers ---
 def find_matching_dirs(segmentation_dirs, target_brain_id):
     # Find matching directory
     matching_dir = None
