@@ -24,6 +24,7 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
 )
+from google.auth.exceptions import RefreshError
 from google.cloud import storage
 from io import BytesIO, StringIO
 from tqdm import tqdm
@@ -402,7 +403,10 @@ class Reader:
 
                 # Store results
                 for process in as_completed(processes):
-                    swc_dicts.extend(process.result())
+                    try:
+                        swc_dicts.extend(process.result())
+                    except RefreshError as e:
+                        print(f"Authentication refresh failed: {e}")
                     pbar.update(1)
         return swc_dicts
 

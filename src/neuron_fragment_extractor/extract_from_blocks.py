@@ -163,7 +163,7 @@ def download_swc(source_path, dst_path, metadata):
                 continue  # skip malformed lines
 
             nid, ntype = parts[0], parts[1]
-            x, y, z = map(float, parts[2:5])
+            z, y, x = map(float, parts[2:5])
             radius = parts[5]
             parent = parts[6]
 
