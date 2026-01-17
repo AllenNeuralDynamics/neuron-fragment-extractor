@@ -38,12 +38,6 @@ def main():
             continue
         print("Dataset:", brain_id, block_id)
 
-        # Store ground truth tracings
-        input_dir = gt_subdir.replace("blocks", "swcs")
-        output_dir = get_output_dir(brain_id, block_id, None, True)
-        store_groundtruth_swcs(input_dir, output_dir, metadata)
-        continue
-
         # Extract fragments by segmentation
         swc_reader = swc_util.Reader(anisotropy, min_size)
         for segmentation_dir in find_matching_dirs(segmentation_dirs, brain_id):
@@ -67,6 +61,10 @@ def main():
             print("# Fragments Found:", util.count_files(output_dir))
             print("")
 
+        # Store ground truth tracings
+        input_dir = gt_subdir.replace("blocks", "swcs")
+        output_dir = get_output_dir(brain_id, block_id, None, True)
+        store_groundtruth_swcs(input_dir, output_dir, metadata)
 
 def store_groundtruth_swcs(input_dir, output_dir, metadata):
     for swc_path in util.list_gcs_filenames(bucket_name, input_dir, ".swc"):
