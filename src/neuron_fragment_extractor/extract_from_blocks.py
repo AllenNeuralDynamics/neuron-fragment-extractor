@@ -63,9 +63,8 @@ def main():
 
         # Store ground truth tracings
         input_dir = gt_subdir.replace("blocks", "swcs")
-        output_dir = get_output_dir(brain_id, block_id, segmentation_id, True)
+        output_dir = get_output_dir(brain_id, block_id, None, True)
         store_groundtruth_swcs(input_dir, output_dir, metadata)
-
 
 def store_groundtruth_swcs(input_dir, output_dir, metadata):
     for swc_path in util.list_gcs_filenames(bucket_name, input_dir, ".swc"):
@@ -168,10 +167,10 @@ def download_swc(source_path, dst_path, metadata):
             radius = parts[5]
             parent = parts[6]
 
-            # Apply offset, then convert physical → voxel
-            vx = (x + ox) / sx
-            vy = (y + oy) / sy
-            vz = (z + oz) / sz
+            # Apply offset, then convert local voxel → physical
+            vz = (x + ox) * sz
+            vy = (y + oy) * sy
+            vx = (z + oz) * sx
 
             converted_lines.append(
                 f"{nid} {ntype} {vx:.6f} {vy:.6f} {vz:.6f} {radius} {parent}\n"
