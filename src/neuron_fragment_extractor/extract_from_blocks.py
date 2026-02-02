@@ -34,7 +34,7 @@ def main():
         metadata = util.read_json_from_gcs(bucket_name, metadata_path)
         brain_id = get_brain_id(metadata)
         block_id = gt_subdir.split("/")[-2]
-        if int(block_id[-2]) != 0:
+        if int(block_id[-2]) != 2 or int(block_id[-1]) != 1:
             continue
         print("Dataset:", brain_id, block_id)
 
@@ -65,12 +65,18 @@ def main():
         input_dir = gt_subdir.replace("blocks", "swcs")
         output_dir = get_output_dir(brain_id, block_id, None, True)
         store_groundtruth_swcs(input_dir, output_dir, metadata)
+        util.write_json(metadata)
+
 
 def store_groundtruth_swcs(input_dir, output_dir, metadata):
     for swc_path in util.list_gcs_filenames(bucket_name, input_dir, ".swc"):
         input_path = os.path.join(f"gs://{bucket_name}", swc_path)
         output_path = os.path.join(output_dir, os.path.basename(swc_path))
-        download_swc(input_path, output_path, metadata)
+        store_swc(input_path, output_path, metadata)
+
+
+def store_metadata(input_path, output_path, metadata):
+    pass
 
 
 # --- Helpers ---
@@ -139,7 +145,7 @@ def get_output_dir(brain_id, block_id, segmentation_id, is_gt=False):
     return path
 
 
-def download_swc(source_path, dst_path, metadata):
+def store_swc(source_path, dst_path, metadata):
     fs = gcsfs.GCSFileSystem()
     with fs.open(source_path, 'r') as f:
         converted_lines = list()
