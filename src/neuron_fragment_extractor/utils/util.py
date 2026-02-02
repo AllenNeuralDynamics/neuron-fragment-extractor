@@ -293,6 +293,21 @@ def read_zip(zip_file, path):
         return f.read().decode("utf-8")
 
 
+def write_json(path, contents):
+    """
+    Writes "contents" to a JSON file at "path".
+
+    Parameters
+    ----------
+    path : str
+        Path that txt file is written to.
+    contents : dict
+        Contents to be written to a JSON file.
+    """
+    with open(path, "w") as f:
+        json.dump(contents, f)
+
+
 # --- OS utils ---
 def count_files(directory):
     """
