@@ -21,13 +21,14 @@ from segmentation_skeleton_metrics.utils import util
 
 def main():
     # Extract fragments
-    #evaluate_segmentation()
+    evaluate_segmentation()
 
     # Load merge sites
     merge_sites_path = os.path.join(input_dir, "results-merge_sites.csv")
     all_merge_sites = pd.read_csv(merge_sites_path)
 
     # Build dataset directory
+    print("\nExtracting merge site dataset...")
     fragments_dir = os.path.join(input_dir, "fragments")
     for gt_filename in util.list_dir(fragments_dir, ".zip"):
         # Create dataset directory
@@ -49,15 +50,18 @@ def main():
         copy_fragments_subset(gt_name, neuron_output_dir, merged_ids, False)
 
         # Copy merge sites
+        gt_id = get_gt_id(gt_name)
         merge_names = get_merge_names(merge_sites)
-        copy_merge_sites(neuron_output_dir, merge_names)
+        if len(merge_names) > 0:
+            copy_merge_sites(neuron_output_dir, merge_names, gt_id)
 
-        path = os.path.join(neuron_output_dir, f"{gt_name}-merge_sites.csv")
+        path = os.path.join(neuron_output_dir, f"merge_sites_{brain_id}-{gt_id}.csv")
         merge_sites.to_csv(path, index=False)
 
     # Clean up dataset directory
     path = os.path.join(output_dir, "merge_sites.csv")
     all_merge_sites.to_csv(path, index=False)
+    shutil.rmtree(input_dir)
 
 
 def copy_gt_swc(gt_name, dst_dir):
@@ -70,8 +74,12 @@ def copy_gt_swc(gt_name, dst_dir):
 
 
 def copy_fragments(gt_name, dst_dir):
+    # Paths
+    gt_id = get_gt_id(gt_name)
     src_zip = os.path.join(input_dir, "fragments", f"{gt_name}.zip")
-    dst_zip = os.path.join(dst_dir, "fragments.zip")
+    dst_zip = os.path.join(dst_dir, f"fragments-{brain_id}.{gt_id}.zip")
+
+    # Parse files
     exclude_name = f"{gt_name}.swc"
     with zipfile.ZipFile(src_zip, "r") as zin, \
          zipfile.ZipFile(dst_zip, "w", compression=zipfile.ZIP_DEFLATED) as zout:
@@ -83,12 +91,13 @@ def copy_fragments(gt_name, dst_dir):
 
 def copy_fragments_subset(gt_name, dataset_dir, merged_ids, is_merges):
     # Parameters
+    gt_id = get_gt_id(gt_name)
     is_contained = is_merged_fragment if is_merges else is_nonmerged_fragment
     name = "fragments_merged" if is_merges else "fragments_nonmerged"
 
     # Paths
     src_zip = os.path.join(input_dir, "fragments", f"{gt_name}.zip")
-    dst_zip = os.path.join(dataset_dir, f"{name}.zip")
+    dst_zip = os.path.join(dataset_dir, f"{name}-{brain_id}.{gt_id}.zip")
     exclude_name = f"{gt_name}.swc"
 
     # Parse files
@@ -105,18 +114,17 @@ def copy_fragments_subset(gt_name, dataset_dir, merged_ids, is_merges):
                 zout.writestr(item, zin.read(item.filename))
 
 
-def copy_merge_sites(dataset_dir, merge_names):
+def copy_merge_sites(dataset_dir, merge_names, gt_id):
     # Paths
     src_zip = os.path.join(input_dir, "results-merged_fragments.zip")
-    dst_zip = os.path.join(dataset_dir, "merge_sites.zip")
+    dst_zip = os.path.join(dataset_dir, f"merge_sites-{brain_id}.{gt_id}.zip")
 
     # Parse files
     with zipfile.ZipFile(src_zip, "r") as zin, \
          zipfile.ZipFile(dst_zip, "w", compression=zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
             # Check whether to write
-            swc_name, _ = os.path.splitext(item.filename)
-            if swc_name in merge_names:
+            if item.filename in merge_names:
                 zout.writestr(item, zin.read(item.filename))
 
 
@@ -150,6 +158,10 @@ def evaluate_segmentation():
         save_fragments=save_fragments,
         save_merges=save_merges,
     )
+
+
+def get_gt_id(gt_name):
+    return gt_name.split("-")[0]
 
 
 def get_merge_ids(merge_sites):
