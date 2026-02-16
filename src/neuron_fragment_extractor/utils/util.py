@@ -326,7 +326,7 @@ def count_files(directory):
     return sum(1 for f in Path(directory).iterdir() if f.is_file())
 
 
-def listdir(path, extension=None):
+def list_dir(path, extension=None):
     """
     Lists all files in the directory at "path". If an extension is
     provided, then only files containing "extension" are returned.
