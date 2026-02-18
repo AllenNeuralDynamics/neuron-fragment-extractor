@@ -19,7 +19,7 @@ import argparse
 import pandas as pd
 import os
 
-from neuron_fragment_extractor.utils import util
+from segmentation_skeleton_metrics.data_handling import util
 
 
 def main():

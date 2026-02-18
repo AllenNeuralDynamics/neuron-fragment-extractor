@@ -12,7 +12,8 @@ truth neuron tracings. The following outputs are extracted:
             * nonmerge_sites.zip
 """
 
-from neuron_proofreader.skeleton_graph import SkeletonGraph
+from neuron_fragment_extractor.graph_classes import SkeletonGraph
+from tqdm import tqdm
 
 import numpy as np
 import os
@@ -35,11 +36,13 @@ def main():
 
 def find_nearby_branches(graph):
     # Find sorted sites
-    nodes = find_nearby_nodes(graph)
+    nodes = find_nearby_sites(graph)
     dists = [graph.dist(i, j) for i, j in nodes]
-    nodes = nodes[np.argsort(dists)]
+    nodes = [nodes[i] for i in np.argsort(dists)]
+    print("# Initial Sites:", len(nodes))
 
     # Prune redundant sites
+    visited = set()
 
 
 def find_branching_points(fragments_graph, gt_graph):
@@ -47,10 +50,10 @@ def find_branching_points(fragments_graph, gt_graph):
 
 
 # --- Helpers ---
-def find_nearby_nodes(graph):
+def find_nearby_sites(graph):
     nodes = set()
-    for i in graph.nodes:
-        for j in graph.kdtree.query_ball_point(graph.node_xyz[i], radius):
+    for i in tqdm(graph.nodes):
+        for j in graph.get_nearby_nodes(graph.node_xyz[i], radius):
             if graph.node_component_id[i] != graph.node_component_id[j]:
                 nodes.add(frozenset({i, j}))
                 break
@@ -58,9 +61,8 @@ def find_nearby_nodes(graph):
 
 
 def load_skeletons(swcs_pointer):
-    graph = SkeletonGraph()
+    graph = SkeletonGraph(verbose=True)
     graph.load(swcs_pointer)
-    graph.set_kdtree()
     return graph
 
 

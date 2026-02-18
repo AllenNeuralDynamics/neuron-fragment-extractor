@@ -24,7 +24,7 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
 )
-from google.auth.exceptions import RefreshError
+from google.auth.exceptions import RefreshError, TransportError
 from google.cloud import storage
 from io import BytesIO, StringIO
 from tqdm import tqdm
@@ -60,7 +60,7 @@ class Reader:
         self.anisotropy = anisotropy
         self.min_size = min_size
 
-    def read(self, swc_pointer):
+    def __call__(self, swc_pointer):
         """
         Reads SWC files located at the path specified by "swc_pointer".
 
@@ -72,8 +72,8 @@ class Reader:
                 - dir_path: Path to local directory with SWC files
                 - zip_path: Path to local ZIP with SWC files
                 - zip_dir_path: Path to local directory of ZIPs with SWC files
-                - gcs_dir_path: Path to GCS directory with SWC files
-                - gcs_zip_dir_path: Path to GCS directory with ZIPs of SWC files
+                - gcs_dir_path: Path to GCS prefix with SWC files
+                - gcs_zip_dir_path: Path to GCS prefix with ZIPs of SWC files
                 - path_list: List of paths to local SWC files
 
         Returns
@@ -236,13 +236,21 @@ class Reader:
             List of dictionaries whose keys and values are the attribute
             names and values from an SWC file.
         """
-        with ZipFile(zip_path, "r") as zip_file:
-            swc_dicts = deque()
-            swc_files = [f for f in zip_file.namelist() if f.endswith(".swc")]
-            for f in swc_files:
-                swc_dict = self.read_from_zipped_file(zip_file, f)
-                if swc_dict:
-                    swc_dicts.append(swc_dict)
+        with ThreadPoolExecutor() as executor:
+            with ZipFile(zip_path, "r") as zf:
+                # Submit threads
+                threads = list()
+                for f in [f for f in zf.namelist() if f.endswith(".swc")]:
+                    threads.append(
+                        executor.submit(self.read_from_zipped_file, zf, f)
+                    )
+
+                # Store results
+                swc_dicts = deque()
+                for thread in as_completed(threads):
+                    swc_dict = thread.result()
+                    if swc_dict:
+                        swc_dicts.append(swc_dict)
         return swc_dicts
 
     def read_from_zipped_file(self, zip_file, path):
@@ -405,8 +413,8 @@ class Reader:
                 for process in as_completed(processes):
                     try:
                         swc_dicts.extend(process.result())
-                    except RefreshError as e:
-                        print(f"Authentication refresh failed: {e}")
+                    except RefreshError:
+                        pass
                     pbar.update(1)
         return swc_dicts
 
@@ -430,10 +438,14 @@ class Reader:
             List of dictionaries whose keys and values are the attribute
             names and values from an SWC file.
         """
-        # Download zip
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        zip_content = bucket.blob(zip_path).download_as_bytes()
+        try:
+            # Download zip
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            zip_content = bucket.blob(zip_path).download_as_bytes()
+        except TransportError:
+            print(f"Failed to read {zip_path}!")
+            return deque()
 
         # Process files
         swc_dicts = deque()
@@ -603,7 +615,7 @@ def get_segment_id(swc_name):
     Parameters
     ----------
     swc_name : str
-        SWC filename, expected to be in the format "<segment_id>.swc".
+        SWC filename, expected to be in the format "{segment_id}.swc".
 
     Returns
     -------
@@ -619,7 +631,7 @@ def get_segment_id(swc_name):
 
 def get_swc_name(path):
     """
-    Gets name of the SWC file at "path".
+    Gets name of the SWC file loacted at the given path, minus the extension.
 
     Parameters
     ----------
@@ -628,8 +640,8 @@ def get_swc_name(path):
 
     Returns
     -------
-    str
-        SWC filename.
+    name : str
+        Name of the SWC file, minus the extension.
     """
     filename = os.path.basename(path)
     name, ext = os.path.splitext(filename)
@@ -646,11 +658,11 @@ def to_graph(swc_dict, set_attrs=False):
         Contents of an SWC file.
     set_attrs : bool, optional
         Indication of whether to set "xyz" and "radius" as graph-level
-        attributes.
+        attributes. Default is False.
 
     Returns
     -------
-    networkx.Graph
+    graph : networkx.Graph
         Graph built from an SWC file.
     """
     # Reindex nodes: map swc ids to 0...N-1
@@ -667,29 +679,3 @@ def to_graph(swc_dict, set_attrs=False):
         graph.graph["xyz"] = swc_dict["xyz"]
         graph.graph["radius"] = swc_dict["radius"]
     return graph
-
-
-def write_swc(swc_dict, output_path):
-    graph = to_graph(swc_dict, set_attrs=True)
-    with open(output_path, "w") as f:
-        # Preamble
-        f.write("\n# id, type, z, y, x, r, pid")
-
-        # Write entries
-        node_to_idx = dict()
-        for i, j in nx.dfs_edges(graph):
-            # Special Case: Root
-            if len(node_to_idx) == 0:
-                parent = -1
-                node_to_idx[i] = 1
-                x, y, z = tuple(graph.graph["xyz"][i])
-                r = graph.graph["radius"][i]
-                f.write(f"\n1 2 {x} {y} {z} {r} {parent}")
-
-            # General Case
-            node = len(node_to_idx) + 1
-            parent = node_to_idx[i]
-            node_to_idx[j] = node
-            x, y, z = tuple(graph.graph["xyz"][j])
-            r = graph.graph["radius"][j]
-            f.write(f"\n{node} 2 {x} {y} {z} {r} {parent}")
