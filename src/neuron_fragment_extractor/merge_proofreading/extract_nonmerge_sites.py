@@ -14,6 +14,7 @@ truth neuron tracings. The following outputs are extracted:
 
 from neuron_proofreader.skeleton_graph import SkeletonGraph
 
+import numpy as np
 import os
 
 
@@ -33,20 +34,10 @@ def main():
 
 
 def find_nearby_branches(graph):
-    # Find nearby sites
-    dists_list = list()
-    nodes_list = list()
-    visited = set()
-    for i in graph.nodes:
-        for j in graph.kdtree.query_ball_point(graph.node_xyz[i], radius):
-            if graph.node_component_id[i] != graph.node_component_id[j]:
-                nodes = frozenset({i, j})
-                dist = graph.dist(i, j)
-                if nodes not in visited:
-                    nodes_list.append(nodes)
-                    dists_list.append(dist)
-                    visited.add(nodes)
-                break
+    # Find sorted sites
+    nodes = find_nearby_nodes(graph)
+    dists = [graph.dist(i, j) for i, j in nodes]
+    nodes = nodes[np.argsort(dists)]
 
     # Prune redundant sites
 
@@ -56,6 +47,16 @@ def find_branching_points(fragments_graph, gt_graph):
 
 
 # --- Helpers ---
+def find_nearby_nodes(graph):
+    nodes = set()
+    for i in graph.nodes:
+        for j in graph.kdtree.query_ball_point(graph.node_xyz[i], radius):
+            if graph.node_component_id[i] != graph.node_component_id[j]:
+                nodes.add(frozenset({i, j}))
+                break
+    return list(nodes)
+
+
 def load_skeletons(swcs_pointer):
     graph = SkeletonGraph()
     graph.load(swcs_pointer)
