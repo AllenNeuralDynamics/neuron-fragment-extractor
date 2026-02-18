@@ -1,0 +1,78 @@
+"""
+Created on Mon Feb 2 12:00:00 2026
+
+@author: Anna Grim
+@email: anna.grim@alleninstitute.org
+
+Code that extracts nonmerge sites from fragments that intersect with ground
+truth neuron tracings. The following outputs are extracted:
+    /{brain_id}
+        /{segmentation_id}
+            * nonmerge_sites.csv
+            * nonmerge_sites.zip
+"""
+
+from neuron_proofreader.skeleton_graph import SkeletonGraph
+
+import os
+
+
+def main():
+    # Paths
+    fragments_path = os.path.join(output_dir, "fragments_nonmerged.zip")
+    gt_path = os.path.join(output_dir, "gt_neurons.zip")
+
+    # Load skeletons
+    fragments_graph = load_skeletons(fragments_path)
+    gt_graph = load_skeletons(gt_path)
+
+    # Detect
+    nonmerge_sites = dict()
+    nonmerge_sites.update(find_nearby_branches(fragments_graph))
+    nonmerge_sites.update(find_branching_points(fragments_graph, gt_graph))
+
+
+def find_nearby_branches(graph):
+    # Find nearby sites
+    dists_list = list()
+    nodes_list = list()
+    visited = set()
+    for i in graph.nodes:
+        for j in graph.kdtree.query_ball_point(graph.node_xyz[i], radius):
+            if graph.node_component_id[i] != graph.node_component_id[j]:
+                nodes = frozenset({i, j})
+                dist = graph.dist(i, j)
+                if nodes not in visited:
+                    nodes_list.append(nodes)
+                    dists_list.append(dist)
+                    visited.add(nodes)
+                break
+
+    # Prune redundant sites
+
+
+def find_branching_points(fragments_graph, gt_graph):
+    pass
+
+
+# --- Helpers ---
+def load_skeletons(swcs_pointer):
+    graph = SkeletonGraph()
+    graph.load(swcs_pointer)
+    graph.set_kdtree()
+    return graph
+
+
+if __name__ == "__main__":
+    # Parameters
+    brain_id = "802449"
+    segmentation_id = "jin_masked_mean40_stddev105"
+
+    parameters = (128, 128, 128)
+    radius = 20
+
+    # Paths
+    output_dir = f"/home/jupyter/results/merge_datasets/{brain_id}/{segmentation_id}"
+
+    # Run code
+    main()

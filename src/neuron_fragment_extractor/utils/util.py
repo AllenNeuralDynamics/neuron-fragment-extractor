@@ -11,6 +11,7 @@ Miscellaneous helper routines.
 
 from google.cloud import storage
 from pathlib import Path
+from zipfile import ZipFile, ZIP_DEFLATED
 
 import json
 import os
@@ -326,6 +327,20 @@ def count_files(directory):
     return sum(1 for f in Path(directory).iterdir() if f.is_file())
 
 
+def copy_file_from_zip(src_zip, src_name, dst_path):
+    with ZipFile(src_zip, "r") as zf:
+        with zf.open(src_name) as src, open(dst_path, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+
+
+def copy_files_from_zip(src_zip, src_names, dst_zip, mode="a"):
+    with ZipFile(src_zip, "r") as zin, \
+         ZipFile(dst_zip, mode, compression=ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            if item.filename in src_names:
+                zout.writestr(item, zin.read(item.filename))
+
+
 def list_dir(path, extension=None):
     """
     Lists all files in the directory at "path". If an extension is
@@ -368,9 +383,14 @@ def list_paths(directory, extension=None):
         List of all paths within "directory".
     """
     paths = list()
-    for f in listdir(directory, extension=extension):
+    for f in list_dir(directory, extension=extension):
         paths.append(os.path.join(directory, f))
     return paths
+
+
+def list_zip_filenames(zip_path):
+    with ZipFile(zip_path, 'r') as z:
+        return z.namelist()
 
 
 def mkdir(path, delete=False):
