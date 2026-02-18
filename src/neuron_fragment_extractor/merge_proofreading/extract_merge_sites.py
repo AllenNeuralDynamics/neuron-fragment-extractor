@@ -5,17 +5,17 @@ Created on Mon Feb 2 12:00:00 2026
 @email: anna.grim@alleninstitute.org
 
 Code that extracts merge sites from fragments that intersect with ground truth
-neuron tracings. The following outputs are extracted:
-    /{brain_id}
-        /{segmentation_id}
-            * gt_neurons.zip
-            * fragments.zip
-            * fragments_merged.zip
-            * fragments_nonmerged.zip
-            * merge_sites.csv
-            * merge_sites.zip
+neuron tracings. The following are extracted:
+    /{output_dir}
+        * gt_neurons.zip
+        * fragments.zip
+        * fragments_merged.zip
+        * fragments_nonmerged.zip
+        * merge_sites.csv
+        * merge_sites.zip
 """
 
+import argparse
 import pandas as pd
 import os
 
@@ -115,15 +115,14 @@ def get_site_names(merge_sites):
 
 
 if __name__ == "__main__":
-    # Dataset
-    brain_id = "802449"
-    segmentation_id = "jin_masked_mean40_stddev105"
+    # Argument parser
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_dir")
+    parser.add_argument("--output_dir")
 
-    # Paths
-    input_dir = f"/home/jupyter/results/merge_datasets/{brain_id}/temp"
-    output_dir = f"/home/jupyter/results/merge_datasets/{brain_id}/{segmentation_id}"
+    # Run code
+    args = parser.parse_args()
+    input_dir = args.input_dir
+    output_dir = args.output_dir
 
-    util.mkdir(output_dir, True)
-
-    # Run
     main()
