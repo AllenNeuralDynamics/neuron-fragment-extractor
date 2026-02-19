@@ -87,7 +87,10 @@ class SkeletonGraph(nx.Graph):
         # Add edges
         for (i, j), attrs in irreducibles["edges"].items():
             edge_id = (node_id_mapping[i], node_id_mapping[j])
-            self._add_edge(edge_id, attrs, component_id)
+            if len(attrs["xyz"]) > 2:
+                self._add_edge(edge_id, attrs, component_id)
+            else:
+                self.add_edge(i, j)
 
     def _add_nodes(self, node_dict, component_id):
         """
@@ -156,7 +159,6 @@ class SkeletonGraph(nx.Graph):
                 # Store attributes
                 self.node_xyz[new_id] = xyz
                 self.node_component_id[new_id] = component_id
-        self.add_edge(new_id, end)
 
     # --- Helpers ---
     def clip_to_groundtruth(self, gt_graph, dist):
@@ -178,7 +180,7 @@ class SkeletonGraph(nx.Graph):
 
         # Remove resulting small connected components
         for nodes in list(nx.connected_components(self)):
-            if len(nodes) < 20:
+            if len(nodes) < 30:
                 self.remove_nodes_from(nodes)
         self.relabel_nodes()
 
