@@ -326,13 +326,21 @@ def count_files(directory):
     return sum(1 for f in Path(directory).iterdir() if f.is_file())
 
 
-def copy_file_from_zip(src_zip, src_name, dst_path):
-    with ZipFile(src_zip, "r") as zf:
-        with zf.open(src_name) as src, open(dst_path, "wb") as dst:
-            shutil.copyfileobj(src, dst)
-
-
 def copy_files_from_zip(src_zip, src_names, dst_zip, mode="a"):
+    """
+    Copies a list of files from "src_zip" to "dst_zip".
+
+    Parameters
+    ----------
+    src_zip : str
+        Path to source ZIP archive.
+    src_names : List[str]
+        List of filenames in "src_zip" to be copied to "dst_zip".
+    dst_zip : str
+        Path to the destination ZIP archive.
+    mode : str
+        Write mode of the ZIP writer. Default is "a".
+    """
     with ZipFile(src_zip, "r") as zin, \
          ZipFile(dst_zip, mode, compression=ZIP_DEFLATED) as zout:
         for item in zin.infolist():

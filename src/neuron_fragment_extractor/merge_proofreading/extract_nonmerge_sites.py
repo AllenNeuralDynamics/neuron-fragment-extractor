@@ -14,12 +14,13 @@ truth neuron tracings. The following outputs are extracted:
 from scipy.spatial import KDTree
 from tqdm import tqdm
 
+import argparse
 import numpy as np
 import os
 import pandas as pd
 
 from neuron_fragment_extractor.graph_classes import SkeletonGraph
-from neuron_fragment_extractor.utils import swc_util, util
+from neuron_fragment_extractor.utils import swc_util
 
 
 def main():
@@ -56,18 +57,15 @@ def find_nonmerge_sites(graph):
 def save_site_metadata(graph, sites):
     metadata = list()
     for cnt, (i, j) in enumerate(sites):
-        # Extract info
-        xyz = graph.midpoint(i, j)
-        voxel = util.to_voxels(xyz, (0.748, 0.748, 1.0))
-
-        # Record info
         metadata.append(
             {
                 "NonMerge_ID": f"nonmerge-{cnt + 1}.swc",
                 "Segment_ID_1": graph.get_node_segment_id(i),
                 "Segment_ID_2": graph.get_node_segment_id(j),
-                "Voxel": tuple([int(u) for u in xyz]),
-                "World": tuple([float(u) for u in voxel]),
+                "Voxel_1": tuple([int(u) for u in graph.node_voxel(i)]),
+                "Voxel_2": tuple([int(u) for u in graph.node_voxel(j)]),
+                "World_1": tuple([float(u) for u in graph.node_xyz[i]]),
+                "World_2": tuple([float(u) for u in graph.node_xyz[j]]),
             }
         )
     path = os.path.join(output_dir, "nonmerge_sites.csv")
@@ -134,19 +132,32 @@ def get_site_component_ids(graph, site):
     return frozenset({id_i, id_j})
 
 
-def load_skeletons(swcs_pointer):
-    graph = SkeletonGraph()
-    graph.load(swcs_pointer)
+def load_skeletons(swc_pointer):
+    """
+    Loads the SWC files into a SkeletonGraph.
+
+    Parameters
+    ----------
+    swc_pointer : str
+        Path to SWC files to be loaded.
+
+    Returns
+    -------
+    graph : SkeletonGraph
+        Graph with specified SWC files loaded.
+    """
+    graph = SkeletonGraph(anisotropy=(0.748, 0.748, 1.0))
+    graph.load(swc_pointer)
     return graph
 
 
 if __name__ == "__main__":
-    # Parameters
-    brain_id = "802449"
-    segmentation_id = "jin_masked_mean40_stddev105"
-
-    # Paths
-    output_dir = f"/home/jupyter/results/merge_datasets/{brain_id}/{segmentation_id}"
+    # Argument parser
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output_dir")
 
     # Run code
+    args = parser.parse_args()
+    output_dir = args.output_dir
+
     main()
