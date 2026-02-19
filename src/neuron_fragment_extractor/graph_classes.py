@@ -16,7 +16,7 @@ from scipy.spatial.distance import euclidean
 import networkx as nx
 import numpy as np
 
-from neuron_fragment_extractor.utils import graph_util
+from neuron_fragment_extractor.utils import graph_util, util
 
 
 class SkeletonGraph(nx.Graph):
@@ -25,7 +25,7 @@ class SkeletonGraph(nx.Graph):
     files, where each connected component represents a single SWC file.
     """
 
-    def __init__(self):
+    def __init__(self, anisotropy=(1.0, 1.0, 1.0)):
         """
         Instantiates a SkeletonGraph object.
         """
@@ -33,6 +33,7 @@ class SkeletonGraph(nx.Graph):
         super().__init__()
 
         # Instance attributes
+        self.anisotropy = anisotropy
         self.component_id_to_swc_name = dict()
         self.graph_loader = graph_util.GraphLoader()
         self.node_kdtree = None
@@ -300,6 +301,22 @@ class SkeletonGraph(nx.Graph):
                     queue.append((j, dist_j))
                     visited.add(j)
         return False
+
+    def node_voxel(self, i):
+        """
+        Gets the voxel coordinate of the given node.
+
+        Parameters
+        ----------
+        i : int
+            Node ID.
+
+        Returns
+        -------
+        Tuple[int]
+            Voxel coordinate of the given node.
+        """
+        return util.to_voxels(self.node_xyz[i], self.anisotropy)
 
     def reassign_component_ids(self):
         """

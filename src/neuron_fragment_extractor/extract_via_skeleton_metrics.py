@@ -17,6 +17,10 @@ import argparse
 
 
 def main():
+    """
+    Extracts fragments that intersect with ground truth tracings and saves the
+    results in "output_dir".
+    """
     # Paths
     fragments_path = f"gs://allen-nd-goog/from_google/{brain_id}/whole_brain/{segmentation_id}/swcs"
     gt_path = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel/"
