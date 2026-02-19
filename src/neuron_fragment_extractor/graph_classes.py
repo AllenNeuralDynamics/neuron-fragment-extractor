@@ -20,21 +20,34 @@ from neuron_fragment_extractor.utils import graph_util
 
 
 class SkeletonGraph(nx.Graph):
+    """
+    A custom subclass of NetworkX tailored for graphs constructed from SWC
+    files, where each connected component represents a single SWC file.
+    """
 
-    def __init__(self, anisotropy=(1.0, 1.0, 1.0), verbose=True):
+    def __init__(self):
+        """
+        Instantiates a SkeletonGraph object.
+        """
         # Call parent class
         super().__init__()
 
         # Instance attributes
-        self.anisotropy = anisotropy
         self.component_id_to_swc_name = dict()
         self.graph_loader = graph_util.GraphLoader()
         self.node_kdtree = None
         self.node_xyz = None
-        self.verbose = verbose
 
     # --- Build Graph ---
     def load(self, swc_pointer):
+        """
+        Loads SWC files into graph.
+
+        Parameters
+        ----------
+        swc_pointer : str
+            Path that points to SWC files to be read.
+        """
         # Initialize node attribute data structures
         irreducibles = self.graph_loader(swc_pointer)
         num_nodes = graph_util.count_nodes(irreducibles)
@@ -145,6 +158,28 @@ class SkeletonGraph(nx.Graph):
         self.add_edge(new_id, end)
 
     # --- Helpers ---
+    def clip_to_groundtruth(self, gt_graph, dist):
+        """
+        Removes nodes that are more than "dist" microns from "gt_graph".
+    
+        Parameters
+        ----------
+        gt_graph : SkeletonGraph
+            Ground truth graph used as clipping reference.
+        dist : float
+            Distance threshold (in microns) that determines what nodes to remove.
+        """
+        # Remove nodes too far from ground truth
+        d_gt, _ = gt_graph.node_kdtree.query(self.node_xyz)
+        nodes = np.where(d_gt > dist)[0]
+        self.remove_nodes_from(nodes)
+
+        # Remove resulting small connected components
+        for nodes in list(nx.connected_components(self)):
+            if len(nodes) < 20:
+                self.remove_nodes_from(nodes)
+        self.relabel_nodes()
+
     def dist(self, i, j):
         """
         Computes the Euclidean distance between nodes "i" and "j".
@@ -164,4 +199,140 @@ class SkeletonGraph(nx.Graph):
         return euclidean(self.node_xyz[i], self.node_xyz[j])
 
     def get_nearby_nodes(self, xyz, radius):
+        """
+        Gets node IDs within "radius" microns from the given point.
+
+        Parameters
+        ----------
+        xyz : ArrayLike
+            Reference point to query.
+        radius : float
+            Distance (in microns) used in ball point query.
+
+        Returns
+        -------
+        List[int]
+            Node IDs whose distance from "xyz" is less than "radius" microns.
+        """
         return self.node_kdtree.query_ball_point(xyz, radius)
+
+    def get_node_segment_id(self, node):
+        """
+        Gets the segment ID corresponding to the given node.
+
+        Parameters
+        ----------
+        node : int
+            Node ID.
+
+        Returns
+        -------
+        str
+            Segment ID corresponding to the given node.
+        """
+        return self.get_swc_name(node).split(".")[0]
+
+    def get_swc_name(self, i):
+        """
+        Gets the SWC ID of the given node.
+
+        Parameters
+        ----------
+        i : int
+            Node ID.
+
+        Returns
+        -------
+        str
+            SWC ID of the given node.
+        """
+        component_id = self.node_component_id[i]
+        return self.component_id_to_swc_name[component_id]
+
+    def midpoint(self, i, j):
+        """
+        Computes the midpoint between the 3D coordinates corresponding to the
+        given nodes.
+
+        Parameters
+        ----------
+        i : int
+            Node ID.
+        j : int
+            Node ID.
+
+        Returns
+        -------
+        numpy.ndarray
+            Midpoint between the 3D coordinates corresponding to the given
+            nodes.
+        """
+        return np.mean([self.node_xyz[i], self.node_xyz[j]], axis=0)
+
+    def near_leaf(self, node, radius):
+        """
+        Checks if the given node is within "radius" microns of a leaf.
+
+        Parameters
+        ----------
+        node : int
+            Node ID.
+        radius : float
+            Distance (in microns) to search subgraph centered at "node".
+
+        Returns
+        -------
+        bool
+            Indication if the given node is within "radius" microns of a leaf.
+        """
+        queue = [(node, 0)]
+        visited = {node}
+        while queue:
+            # Visit node
+            i, dist_i = queue.pop()
+            if self.degree[i] == 1:
+                return True
+
+            # Update queue
+            for j in self.neighbors(i):
+                dist_j = dist_i + self.dist(i, j)
+                if j not in visited and dist_j < radius:
+                    queue.append((j, dist_j))
+                    visited.add(j)
+        return False
+
+    def reassign_component_ids(self):
+        """
+        Reassigns component IDs for all connected components in the graph.
+        """
+        component_id_to_swc_name = dict()
+        for i, nodes in enumerate(nx.connected_components(self)):
+            nodes = np.array(list(nodes), dtype=int)
+            component_id_to_swc_name[i + 1] = self.get_swc_name(nodes[0])
+            self.node_component_id[nodes] = i + 1
+        self.component_id_to_swc_name = component_id_to_swc_name
+
+    def relabel_nodes(self):
+        """
+        Reassigns contiguous node IDs and update all dependent structures.
+        """
+        # Set node ids
+        old_node_ids = np.array(self.nodes, dtype=int)
+        new_node_ids = np.arange(len(old_node_ids))
+
+        # Set edge ids
+        old_to_new = dict(zip(old_node_ids, new_node_ids))
+        old_edge_ids = list(self.edges)
+        edge_attrs = {(i, j): data for i, j, data in self.edges(data=True)}
+
+        # Reset graph
+        self.clear()
+        for (i, j) in old_edge_ids:
+            self.add_edge(old_to_new[i], old_to_new[j], **edge_attrs[(i, j)])
+
+        # Update attributes
+        self.node_xyz = self.node_xyz[old_node_ids]
+        self.node_component_id = self.node_component_id[old_node_ids]
+
+        self.reassign_component_ids()
+        self.node_kdtree = KDTree(self.node_xyz)

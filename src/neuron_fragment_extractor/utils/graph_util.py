@@ -12,7 +12,6 @@ helper routines for working with graphs.
 from collections import deque
 from concurrent.futures import as_completed, ProcessPoolExecutor
 from scipy.spatial.distance import euclidean
-from tqdm import tqdm
 
 import multiprocessing
 import networkx as nx
@@ -72,7 +71,6 @@ class GraphLoader:
 
         # Load graphs
         multiprocessing.set_start_method('spawn', force=True)
-        pbar = tqdm(total=len(swc_dicts), desc="Extract Graphs")
         with ProcessPoolExecutor() as executor:
             # Start processes
             pending = set()
@@ -86,7 +84,6 @@ class GraphLoader:
                     # Store completed processes
                     irreducibles.append(process.result())
                     pending.remove(process)
-                    pbar.update(1)
 
                     # Continue submitting processes
                     if swc_dicts:
@@ -270,6 +267,24 @@ def set_edge_attrs(graph, attrs):
 
 # --- Miscellaneous ---
 def count_nodes(irreducibles):
+    """
+    Counts the total number of nodes represented in a collection of
+    irreducible components.
+
+    Parameters
+    ----------
+    irreducibles : List[Dict[str, numpy.ndarray]]
+        List of dictionaries containing irreducible components. Each
+        dictionary corresponds to a single with the following:
+            - "nodes": list of irreducible nodes
+            - "edges": list of paths between irreducible nodes
+
+    Returns
+    -------
+    num_nodes : int
+        Number of nodes contained in the given list of irreducible graph
+        components.
+    """
     num_nodes = 0
     for irr in irreducibles:
         num_nodes += len(irr["nodes"])
