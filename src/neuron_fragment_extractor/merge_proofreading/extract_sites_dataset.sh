@@ -36,3 +36,5 @@ python extract_merge_sites.py \
 echo "\nStep 3: Extract Non-Merge Sites"
 python extract_nonmerge_sites.py \
     --output_dir "$OUTPUT_DIR"
+
+rm -rf "$TEMP_DIR"
