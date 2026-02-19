@@ -37,7 +37,8 @@ def main():
         anisotropy=(0.748, 0.748, 1.0),
         fragments_path=fragments_path,
         save_fragments=True,
-        save_merges=True
+        save_merges=True,
+        verbose=False
     )
 
 
