@@ -42,6 +42,7 @@ def main():
     # Copy merge sites CSV
     path = os.path.join(output_dir, "merge_sites.csv")
     merge_sites.to_csv(path, index=False)
+    print("# Merge Sites:", len(merge_sites))
 
 
 def copy_gt_swc(gt_name):
