@@ -159,6 +159,7 @@ class SkeletonGraph(nx.Graph):
                 # Store attributes
                 self.node_xyz[new_id] = xyz
                 self.node_component_id[new_id] = component_id
+        self.add_edge(new_id, end)
 
     # --- Helpers ---
     def clip_to_groundtruth(self, gt_graph, dist):

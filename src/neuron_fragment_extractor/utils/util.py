@@ -15,6 +15,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 
 import json
 import os
+import random
 import shutil
 
 
@@ -442,3 +443,31 @@ def rmdir(path):
     """
     if os.path.exists(path):
         shutil.rmtree(path)
+
+
+def sample_zip(src_zip_path, dst_zip_path, n):
+    """
+    Samples n files from a ZIP archive and write them to a new zip.
+
+    Parameters
+    ----------
+    src_zip_path : str
+        Path to source zip file.
+    dst_zip_path : str
+        Path to output zip file.
+    n : int
+        Number of files to sample.
+    """
+    with ZipFile(src_zip_path, "r") as zin:
+        # Get zip info
+        infos = zin.infolist()
+        filenames = [i for i in infos if not i.is_dir()]
+        assert len(filenames) > 0, "No files found in zip."
+
+        # Sample files
+        n = min(n, len(filenames))
+        sampled_infos = random.sample(filenames, n)
+        with ZipFile(dst_zip_path, "w", compression=ZIP_DEFLATED) as zout:
+            for info in sampled_infos:
+                data = zin.read(info.filename)
+                zout.writestr(info, data)
