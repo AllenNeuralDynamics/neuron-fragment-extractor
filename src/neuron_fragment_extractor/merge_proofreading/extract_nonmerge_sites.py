@@ -33,6 +33,7 @@ def main():
     zip_path = os.path.join(output_dir, "nonmerge_sites.zip")
     swc_util.write_points(site_locations, zip_path, prefix="nonmerge-")
     save_site_metadata(graph, sites)
+    print("# Non-Merge Sites:", len(sites))
 
 
 def load_fragments():

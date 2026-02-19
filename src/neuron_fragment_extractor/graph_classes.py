@@ -162,13 +162,14 @@ class SkeletonGraph(nx.Graph):
     def clip_to_groundtruth(self, gt_graph, dist):
         """
         Removes nodes that are more than "dist" microns from "gt_graph".
-    
+
         Parameters
         ----------
         gt_graph : SkeletonGraph
             Ground truth graph used as clipping reference.
         dist : float
-            Distance threshold (in microns) that determines what nodes to remove.
+            Distance threshold (in microns) that determines what nodes to
+            remove.
         """
         # Remove nodes too far from ground truth
         d_gt, _ = gt_graph.node_kdtree.query(self.node_xyz)
