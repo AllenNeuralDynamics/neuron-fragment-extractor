@@ -187,7 +187,6 @@ def is_list_contained(bbox, voxels):
     bool
         Indication of whether every element in "voxels" is contained in
         "bbox".
-
     """
     return all([is_contained(bbox, voxel) for voxel in voxels])
 
@@ -351,7 +350,7 @@ def list_dir(path, extension=None):
     path : str
         Path to directory to be searched.
     extension : str, optional
-       Extension of file type of interest. The default is None.
+       Extension of file type of interest. Default is None.
 
     Returns
     -------
@@ -374,12 +373,12 @@ def list_paths(directory, extension=None):
     directory : str
         Directory to be searched.
     extension : str, optional
-        If provided, only paths of files with the extension are returned. The
-        default is None.
+        If provided, only paths of files with the extension are returned.
+        Default is None.
 
     Returns
     -------
-    List[str]
+    paths : List[str]
         List of all paths within "directory".
     """
     paths = list()
@@ -389,6 +388,19 @@ def list_paths(directory, extension=None):
 
 
 def list_zip_filenames(zip_path):
+    """
+    Lists the filenames contained in the specified ZIP archive.
+
+    Parameters
+    ----------
+    zip_path : str
+        Path to ZIP archive.
+
+    Returns
+    -------
+    List[str]
+        Filenames contained in the specified ZIP archive.
+    """
     with ZipFile(zip_path, 'r') as z:
         return z.namelist()
 
@@ -404,10 +416,6 @@ def mkdir(path, delete=False):
     delete : bool, optional
         Indication of whether to delete directory at path if it already
         exists. Default is False.
-
-    Returns
-    -------
-    None
     """
     if delete:
         rmdir(path)
@@ -423,10 +431,6 @@ def rmdir(path):
     ----------
     path : str
         Path to directory and subdirectories to be deleted.
-
-    Returns
-    -------
-    None
     """
     if os.path.exists(path):
         shutil.rmtree(path)

@@ -6,10 +6,9 @@ Created on Mon Feb 2 12:00:00 2026
 
 Code that extracts nonmerge sites from fragments that intersect with ground
 truth neuron tracings. The following outputs are extracted:
-    /{brain_id}
-        /{segmentation_id}
-            * nonmerge_sites.csv
-            * nonmerge_sites.zip
+    /{output_dir}
+        * nonmerge_sites.csv
+        * nonmerge_sites.zip
 """
 
 from scipy.spatial import KDTree
@@ -17,12 +16,25 @@ from tqdm import tqdm
 
 import numpy as np
 import os
+import pandas as pd
 
 from neuron_fragment_extractor.graph_classes import SkeletonGraph
-from neuron_fragment_extractor.utils import swc_util
+from neuron_fragment_extractor.utils import swc_util, util
 
 
 def main():
+    # Extract non-merge sites
+    graph = load_fragments()
+    sites = find_nonmerge_sites(graph)
+    site_locations = [graph.midpoint(*tuple(site)) for site in sites]
+
+    # Save results
+    zip_path = os.path.join(output_dir, "nonmerge_sites.zip")
+    swc_util.write_points(site_locations, zip_path, prefix="nonmerge-")
+    save_site_metadata(graph, sites)
+
+
+def load_fragments():
     # Paths
     fragments_path = os.path.join(output_dir, "fragments_nonmerged.zip")
     gt_path = os.path.join(output_dir, "gt_neurons.zip")
@@ -31,30 +43,35 @@ def main():
     graph = load_skeletons(fragments_path)
     gt_graph = load_skeletons(gt_path)
     graph.clip_to_groundtruth(gt_graph, 50)
-
-    # Detect
-    sites = list()
-    sites.extend(find_nearby_branches(graph))
-    #sites.update(find_branching_points(graph, gt_graph))
-    site_locations = [graph.midpoint(*tuple(site)) for site in sites]
-
-    # Save results
-    zip_path = os.path.join(output_dir, "nonmerge_sites.zip")
-    swc_util.write_points(site_locations, zip_path, prefix="nonmerge-")
+    return graph
 
 
-def find_nearby_branches(graph):
+def find_nonmerge_sites(graph):
     sites = find_nearby_sites(graph)
     sites = filter_with_nms(graph, sites)
     sites = filter_nearby_leafs(graph, sites)
     return sites
 
 
-def find_branching_points(graph, gt_graph):
-    # Build KD-Tree with GT branching points
+def save_site_metadata(graph, sites):
+    metadata = list()
+    for cnt, (i, j) in enumerate(sites):
+        # Extract info
+        xyz = graph.midpoint(i, j)
+        voxel = util.to_voxels(xyz, (0.748, 0.748, 1.0))
 
-    # Parse branching points in fragments graph
-    pass
+        # Record info
+        metadata.append(
+            {
+                "NonMerge_ID": f"nonmerge-{cnt + 1}.swc",
+                "Segment_ID_1": graph.get_node_segment_id(i),
+                "Segment_ID_2": graph.get_node_segment_id(j),
+                "Voxel": tuple([int(u) for u in xyz]),
+                "World": tuple([float(u) for u in voxel]),
+            }
+        )
+    path = os.path.join(output_dir, "nonmerge_sites.csv")
+    pd.DataFrame(metadata).to_csv(path, index=False)
 
 
 # --- Helpers ---
@@ -70,7 +87,7 @@ def filter_with_nms(graph, sites):
     # NMS
     visited = set()
     filtered_sites = list()
-    for root in sites:
+    for root in tqdm(sites, "Filter"):
         # Set local min
         if root not in visited:
             filtered_sites.append(root)
@@ -102,8 +119,8 @@ def filter_nearby_leafs(graph, sites):
 
 def find_nearby_sites(graph):
     nodes = set()
-    for i in tqdm(graph.nodes):
-        for j in graph.get_nearby_nodes(graph.node_xyz[i], radius):
+    for i in tqdm(graph.nodes, desc="Search"):
+        for j in graph.get_nearby_nodes(graph.node_xyz[i], 20):
             if graph.node_component_id[i] != graph.node_component_id[j]:
                 nodes.add(frozenset({i, j}))
                 break
@@ -127,9 +144,6 @@ if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
     segmentation_id = "jin_masked_mean40_stddev105"
-
-    parameters = (128, 128, 128)
-    radius = 20
 
     # Paths
     output_dir = f"/home/jupyter/results/merge_datasets/{brain_id}/{segmentation_id}"
