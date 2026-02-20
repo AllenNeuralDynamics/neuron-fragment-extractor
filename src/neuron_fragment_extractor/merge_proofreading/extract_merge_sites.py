@@ -42,6 +42,8 @@ def main():
     # Copy merge sites CSV
     path = os.path.join(output_dir, "merge_sites.csv")
     merge_sites.to_csv(path, index=False)
+
+    print("# Merged Fragments:", len(merge_sites["Segment_ID"].unique()))
     print("# Merge Sites:", len(merge_sites))
 
 

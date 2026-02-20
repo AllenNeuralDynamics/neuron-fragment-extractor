@@ -15,6 +15,7 @@ from scipy.spatial import KDTree
 from tqdm import tqdm
 
 import argparse
+import networkx as nx
 import numpy as np
 import os
 import pandas as pd
@@ -33,6 +34,7 @@ def main():
     zip_path = os.path.join(output_dir, "nonmerge_sites.zip")
     swc_util.write_points(site_locations, zip_path, prefix="nonmerge-")
     save_site_metadata(graph, sites)
+    print("# Non-Merged Fragments:", nx.number_connected_components(graph))
     print("# Non-Merge Sites:", len(sites))
 
 
