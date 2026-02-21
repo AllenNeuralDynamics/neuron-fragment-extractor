@@ -4,7 +4,6 @@ Created on Sun July 16 14:00:00 2023
 @author: Anna Grim
 @email: anna.grim@alleninstitute.org
 
-
 Miscellaneous helper routines.
 
 """
@@ -20,6 +19,23 @@ import shutil
 
 
 # --- GCS utils ---
+def is_gcs_path(path):
+    """
+    Checks if the path is a GCS path.
+
+    Parameters
+    ----------
+    path : str
+        Path to be checked.
+
+    Returns
+    -------
+    bool
+        Indication of whether the path is a GCS path.
+    """
+    return path.startswith("gs://")
+
+
 def gcs_directory_exists(bucket_name, prefix):
     """
     Check whether a directory (prefix) exists in a GCS bucket.
@@ -119,6 +135,24 @@ def read_json_from_gcs(bucket_name, blob_path):
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(blob_path)
     return json.loads(blob.download_as_text())
+
+
+# --- S3 Utils ---
+def is_s3_path(path):
+    """
+    Checks if the path is an S3 path.
+
+    Parameters
+    ----------
+    path : str
+        Path to be checked.
+
+    Returns
+    -------
+    bool
+        Indication of whether the path is an S3 path.
+    """
+    return path.startswith("s3://")
 
 
 # --- Image utils ---
@@ -471,3 +505,35 @@ def sample_zip(src_zip_path, dst_zip_path, n):
             for info in sampled_infos:
                 data = zin.read(info.filename)
                 zout.writestr(info, data)
+
+
+# --- Miscellaneous ---
+def parse_cloud_path(path):
+    """
+    Parses a cloud storage path into its bucket name and key/prefix. Supports
+    paths of the form: "{scheme}://bucket_name/prefix" or without a scheme.
+
+    Parameters
+    ----------
+    path : str
+        Path to be parsed.
+
+    Returns
+    -------
+    bucket_name : str
+        Name of the bucket.
+    prefix : str
+        Cloud prefix.
+    """
+    # Remove s3:// if present
+    if path.startswith("s3://"):
+        path = path[len("s3://"):]
+
+    # Remove gs:// if present
+    if path.startswith("gs://"):
+        path = path[len("gs://"):]
+
+    parts = path.split("/", 1)
+    bucket_name = parts[0]
+    prefix = parts[1] if len(parts) > 1 else ""
+    return bucket_name, prefix
