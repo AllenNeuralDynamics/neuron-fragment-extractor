@@ -32,15 +32,16 @@ def main():
     src_img = TensorStoreImage(img_path)
     dst_img = init_carveout("input.zarr", src_img.shape())
     dst_mask = init_carveout("mask.zarr", src_img.shape())
-    stop
 
     # Generate carveouts
     carve_out_pipeline = CarveOutPipeline(gt_graph, radial_shape)
     carve_out_pipeline.generate_raw(src_img, dst_img)
     carve_out_pipeline.generate_mask(dst_mask)
 
-    tifffile.imwrite("/home/jupyter/raw.tiff", dst_img[0, 0, 0:512].astype(np.uint16))
-    tifffile.imwrite("/home/jupyter/mask.tiff", dst_mask[0, 0, 0:512].astype(np.uint8))
+    # Add larger carve-out at soma
+
+    #tifffile.imwrite("/home/jupyter/raw.tiff", dst_img[0, 0, 0:512].astype(np.uint16))
+    #tifffile.imwrite("/home/jupyter/mask.tiff", dst_mask[0, 0, 0:512].astype(np.uint8))
 
     # Write metadata
 
@@ -51,8 +52,8 @@ class CarveOutPipeline:
         self,
         graph,
         radial_shape,
-        num_readers=16,
-        num_writers=1,
+        num_readers=32,
+        num_writers=32,
         prefetch=128,
         step_size=20
     ):
@@ -86,7 +87,7 @@ class CarveOutPipeline:
     def generate_raw(self, src_img, dst_img):
         def traverse():
             for node in self.traverse_graph():
-                if self.is_patch_contained(node, dst_img.shape[2:]):
+                if self.is_patch_contained(node, dst_img.shape()):
                     slices_q.put(self.node_to_slices(node))
             for _ in range(self.num_readers):
                 slices_q.put(stop)
@@ -112,13 +113,13 @@ class CarveOutPipeline:
                     continue
 
                 slices, patch = item
-                dst_img[slices] = patch
+                dst_img.write(patch, slices)
                 pbar.update(1)
 
         # Initializations
         slices_q = queue.Queue(maxsize=self.prefetch)
         patch_q = queue.Queue(maxsize=self.prefetch)
-        pbar = tqdm(total=self.count_patches(dst_img.shape[2:]), desc="Raw")
+        pbar = tqdm(total=self.count_patches(dst_img.shape()), desc="Raw")
         stop = object()
 
         # Start threads
@@ -142,7 +143,7 @@ class CarveOutPipeline:
             Gets nodes to extract patches about by traversing the graph.
             """
             for node in self.traverse_graph():
-                if self.is_patch_contained(node, dst_img.shape[2:]):
+                if self.is_patch_contained(node, dst_img.shape()):
                     slices_q.put(self.node_to_slices(node))
             for _ in range(self.num_readers):
                 slices_q.put(stop)
@@ -150,18 +151,19 @@ class CarveOutPipeline:
         def writer():
             finished_readers = 0
             while True:
-                item = slices_q.get()
-                if item is stop:
+                slices = slices_q.get()
+                if slices is stop:
                     finished_readers += 1
                     if finished_readers == self.num_readers:
                         break
                     continue
 
-                dst_img[item] = np.ones(self.radial_shape, dtype=int)
+                dst_img.write(mask_patch, slices)
                 pbar.update(1)
 
         # Initializations
-        pbar = tqdm(total=self.count_patches(dst_img.shape[2:]), desc="Mask")
+        pbar = tqdm(total=self.count_patches(dst_img.shape()), desc="Mask")
+        mask_patch = np.ones(self.radial_shape, dtype=np.uint16)
         slices_q = queue.Queue(maxsize=self.prefetch)
         stop = object()
 
@@ -187,6 +189,7 @@ class CarveOutPipeline:
         return cnt
 
     def is_patch_contained(self, node, img_shape):
+        img_shape = img_shape[2:] if len(img_shape) == 5 else img_shape
         voxel = self.graph.node_voxel(node)
         return img_util.is_patch_contained(voxel, self.radial_shape, img_shape)
 

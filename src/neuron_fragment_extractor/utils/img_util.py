@@ -75,6 +75,24 @@ class TensorStoreImage:
         """
         return self.img[slices].read().result()
 
+    def write(self, patch, slices):
+        """
+        Writes the given patch to the specified region.
+
+        Parameters
+        ----------
+        patch : numpy.ndarray
+            Image patch to be written.
+        slices : Tuple[slice]
+            Slice objects specifying the region to extract from the image.
+
+        Returns
+        -------
+        numpy.ndarray
+            Image patch.
+        """
+        self.img[slices] = patch
+
     def shape(self):
         """
         Gets the shape of image.
