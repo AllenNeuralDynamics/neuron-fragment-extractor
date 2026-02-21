@@ -52,8 +52,16 @@ class SkeletonGraph(nx.Graph):
         # Initialize node attribute data structures
         irreducibles = self.graph_loader(swc_pointer)
         num_nodes = graph_util.count_nodes(irreducibles)
-        self.node_component_id = np.zeros((num_nodes), dtype=int)
-        self.node_xyz = np.zeros((num_nodes, 3), dtype=np.float32)
+        if self.number_of_nodes() > 0:
+            self.node_component_id = np.concatenate(
+                (self.node_component_id, np.zeros((num_nodes), dtype=int))
+            )
+            self.node_xyz = np.vstack(
+                [self.node_xyz, np.zeros((num_nodes, 3), dtype=np.float32)]
+            )
+        else:
+            self.node_component_id = np.zeros((num_nodes), dtype=int)
+            self.node_xyz = np.zeros((num_nodes, 3), dtype=np.float32)
 
         # Add irreducibles to graph
         component_id = 0
