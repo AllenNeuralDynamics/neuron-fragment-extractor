@@ -18,7 +18,6 @@ import networkx as nx
 import numpy as np
 import os
 import queue
-import tifffile
 import threading
 
 from neuron_fragment_extractor.graph_classes import SkeletonGraph
@@ -53,7 +52,7 @@ class CarveOutPipeline:
         graph,
         radial_shape,
         num_readers=32,
-        num_writers=32,
+        num_writers=1,
         prefetch=128,
         step_size=20
     ):
@@ -85,6 +84,7 @@ class CarveOutPipeline:
         self.step_size = step_size
 
     def generate_raw(self, src_img, dst_img):
+
         def traverse():
             for node in self.traverse_graph():
                 if self.is_patch_contained(node, dst_img.shape()):
@@ -119,7 +119,8 @@ class CarveOutPipeline:
         # Initializations
         slices_q = queue.Queue(maxsize=self.prefetch)
         patch_q = queue.Queue(maxsize=self.prefetch)
-        pbar = tqdm(total=self.count_patches(dst_img.shape()), desc="Raw")
+        total_patches = self.count_patches(dst_img.shape())
+        pbar = tqdm(total=total_patches, desc="Raw")
         stop = object()
 
         # Start threads
@@ -158,6 +159,7 @@ class CarveOutPipeline:
                         break
                     continue
 
+                # Write patch
                 dst_img.write(mask_patch, slices)
                 pbar.update(1)
 
@@ -177,8 +179,6 @@ class CarveOutPipeline:
 
         for t in threads:
             t.join()
-
-        return dst_img  # TEMP
 
     # --- Helpers ---
     def count_patches(self, img_shape):
