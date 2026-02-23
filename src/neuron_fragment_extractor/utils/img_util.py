@@ -8,12 +8,11 @@ Code for working with images.
 
 """
 
-from numcodecs import Blosc
-from ome_zarr.writer import write_multiscale
-from xarray_multiscale import multiscale
-from xarray_multiscale.reducers import windowed_mode
-
+import gcsfs
+import json
+import matplotlib.pyplot as plt
 import numpy as np
+import os
 import tensorstore as ts
 import zarr
 
@@ -21,7 +20,7 @@ from neuron_fragment_extractor.utils import util
 
 
 # --- IO Utils ---
-class TensorStoreReader:
+class TensorStoreImage:
     """
     Class that reads an image with TensorStore library.
     """
@@ -76,6 +75,24 @@ class TensorStoreReader:
         """
         return self.img[slices].read().result()
 
+    def write(self, patch, slices):
+        """
+        Writes the given patch to the specified region.
+
+        Parameters
+        ----------
+        patch : numpy.ndarray
+            Image patch to be written.
+        slices : Tuple[slice]
+            Slice objects specifying the region to extract from the image.
+
+        Returns
+        -------
+        numpy.ndarray
+            Image patch.
+        """
+        self.img[slices] = patch
+
     def shape(self):
         """
         Gets the shape of image.
@@ -88,47 +105,60 @@ class TensorStoreReader:
         return self.img.shape
 
 
-def write_ome_zarr(
-    img,
-    output_path,
+def init_omezarr_image(
+    img_path,
+    img_shape,
     chunks=(1, 1, 64, 128, 128),
-    compressor=Blosc(cname="zstd", clevel=5, shuffle=Blosc.SHUFFLE),
-    n_levels=1,
-    scale_factors=(1, 1, 2, 2, 2),
     voxel_size=(748, 748, 1000),
 ):
-    # Ensure 5D image (T, C, Z, Y, X)
-    while img.ndim < 5:
-        img = img[np.newaxis, ...]
+    """
+    Creates an OME-Zarr image within a given GCS prefix.
 
-    # Generate multiscale pyramid
-    pyramid = multiscale(img, windowed_mode, scale_factors=scale_factors)[:n_levels]
-    pyramid = [level.data for level in pyramid]
+    Parameters
+    ----------
+    img_path : str
+        Path to GCS prefix that image is to be created.
+    img_shape : Tuple[int]
+        Shape of image to be created.
+    chunks : Tuple[int], optional
+        Shape of image shard. Default is (1, 1, 64, 128, 128).
+    voxel_size : Tuple[int], optional
+        Physical size (in nanometers) of voxels. Default is (748, 748, 1000).
+    """
+    # Initializations
+    print(f"Creating OME-Zarr at {img_path} with shape {img_shape}")
+    fs = gcsfs.GCSFileSystem()
+    root_store = zarr.storage.FSStore(img_path, fs=fs)
+    root_group = zarr.group(store=root_store, overwrite=True)
 
-    # Prepare Zarr store
-    store = zarr.DirectoryStore(output_path, dimension_separator="/")
-    zgroup = zarr.open(store=store, mode="w")
-
-    # Voxel size scaling for each level
-    base_scale = np.array([1, 1, *reversed(voxel_size)])
-    scales = [base_scale[:2].tolist() + (base_scale[2:] * 2**i).tolist() for i in range(n_levels)]
-    coord_transforms = [[{"type": "scale", "scale": s}] for s in scales]
-
-    # Write to OME-Zarr
-    write_multiscale(
-        pyramid=pyramid,
-        group=zgroup,
+    # Create level 0
+    store0 = zarr.storage.FSStore(os.path.join(img_path, str(0)), fs=fs)
+    zarr.zeros(
+        shape=img_shape,
         chunks=chunks,
-        axes=[
-            {"name": "t", "type": "time", "unit": "millisecond"},
-            {"name": "c", "type": "channel"},
-            {"name": "z", "type": "space", "unit": "micrometer"},
-            {"name": "y", "type": "space", "unit": "micrometer"},
-            {"name": "x", "type": "space", "unit": "micrometer"},
-        ],
-        coordinate_transformations=coord_transforms,
-        storage_options={"compressor": compressor},
+        dtype="uint16",
+        store=store0,
+        overwrite=True
     )
+
+    # Write metadata
+    coord_transform = [
+        {"type": "scale", "scale": [1, 1, *reversed(voxel_size)]}
+    ]
+    multiscales = [{
+        "version": "0.4",
+        "datasets": [{"path": "0"}],
+        "axes": [
+            {"name": "t", "type": "time"},
+            {"name": "c", "type": "channel"},
+            {"name": "z", "type": "space"},
+            {"name": "y", "type": "space"},
+            {"name": "x", "type": "space"}
+        ],
+        "coordinateTransformations": coord_transform
+    }]
+    multiscales_dict = {"multiscales": multiscales}
+    root_store[".zattrs"] = json.dumps(multiscales_dict).encode("utf-8")
 
 
 # --- Miscellaneous ---
@@ -225,3 +255,33 @@ def is_patch_contained(center, patch_shape, image_shape):
     start = center - half
     end = start + patch_shape
     return np.all(start >= 0) and np.all(end <= image_shape)
+
+
+def plot_mips(img, output_path=None, vmax=None):
+    """
+    Plots the Maximum Intensity Projections (MIPs) of a 3D image along the XY,
+    XZ, and YZ axes.
+
+    Parameters
+    ----------
+    img : numpy.ndarray
+        Input image to generate MIPs from.
+    output_path : None or str, optional
+        Path that plot is saved to if provided. Default is None.
+    vmax : None or float, optional
+        Brightness intensity used as upper limit of the colormap. Default is
+        None.
+    """
+    vmax = vmax or np.percentile(img, 99.9)
+    fig, axs = plt.subplots(1, 3, figsize=(10, 4))
+    axs_names = ["XY", "XZ", "YZ"]
+    for i in range(3):
+        if len(img.shape) == 5:
+            mip = np.max(img[0, 0, ...], axis=i)
+        else:
+            mip = np.max(img, axis=i)
+
+        axs[i].imshow(mip, vmax=vmax)
+        axs[i].set_title(axs_names[i], fontsize=16)
+        axs[i].set_xticks([])
+        axs[i].set_yticks([])
