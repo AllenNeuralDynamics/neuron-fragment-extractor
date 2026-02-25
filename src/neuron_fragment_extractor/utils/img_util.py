@@ -144,7 +144,7 @@ def init_omezarr_image(
     # Write metadata
     multiscales = [{
         "axes": get_axes(),
-        "datasets": get_datasets(),
+        "datasets": get_datasets(voxel_size, n_levels),
         "name": "/",
         "version": "0.4",
     }]
