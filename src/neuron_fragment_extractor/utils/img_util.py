@@ -142,23 +142,39 @@ def init_omezarr_image(
     )
 
     # Write metadata
-    coord_transform = [
-        {"type": "scale", "scale": [1, 1, *reversed(voxel_size)]}
-    ]
     multiscales = [{
+        "axes": get_axes(),
+        "datasets": get_datasets(),
+        "name": "/",
         "version": "0.4",
-        "datasets": [{"path": "0"}],
-        "axes": [
-            {"name": "t", "type": "time"},
-            {"name": "c", "type": "channel"},
-            {"name": "z", "type": "space"},
-            {"name": "y", "type": "space"},
-            {"name": "x", "type": "space"}
-        ],
-        "coordinateTransformations": coord_transform
     }]
     multiscales_dict = {"multiscales": multiscales}
     root_store[".zattrs"] = json.dumps(multiscales_dict).encode("utf-8")
+
+
+def get_axes():
+    axes = [
+        {"name": "t", "type": "time", "unit": "millisecond"},
+        {"name": "c", "type": "channel"},
+        {"name": "z", "type": "space", "unit": "micrometer"},
+        {"name": "y", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"}
+    ]
+    return axes
+
+
+def get_datasets(voxel_size, n_levels):
+    datasets = list()
+    for k in n_levels:
+        voxel_size_k = [v * 2 ** k for i, v in enumerate(voxel_size) if i > 1]
+        dataset_k = {
+            "coordinateTransformations": [
+                {"scale": voxel_size_k, "type": "scale"}
+            ],
+            "path": str(k)
+        }
+        datasets.append(dataset_k)
+    return datasets
 
 
 # --- Miscellaneous ---
