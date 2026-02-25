@@ -12,10 +12,12 @@ from google.cloud import storage
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 
+import asyncio
 import json
 import os
 import random
 import shutil
+import tensorstore as ts
 
 
 # --- GCS utils ---
@@ -508,6 +510,44 @@ def sample_zip(src_zip_path, dst_zip_path, n):
 
 
 # --- Miscellaneous ---
+async def migrate_omezarr_gcs_to_s3(
+    src_bucket,
+    src_path,
+    dst_bucket,
+    dst_path,
+    concurrency=32
+):
+    """
+    Copies an OME-Zarr dataset from GCS to S3 without decoding/re-encoding.
+
+    Parameters
+    ----------
+    src_bucket : str
+        Source GCS bucket
+    src_path : str
+        Path to source Zarr root.
+    dst_bucket : str
+        Destination S3 bucket
+    dst_path : str
+        Path to destination Zarr root.
+    """
+    src = await ts.KvStore.open({
+        "driver": "gcs",
+        "bucket": src_bucket,
+        "path": src_path.rstrip("/"),
+    })
+    dst = await ts.KvStore.open({
+        "driver": "s3",
+        "bucket": dst_bucket,
+        "path": dst_path.rstrip("/"),
+    })
+
+    keys = await src.list()
+    for key in keys:
+        read_result = await src.read(key)
+        await dst.write(key, read_result.value)
+
+
 def parse_cloud_path(path):
     """
     Parses a cloud storage path into its bucket name and key/prefix. Supports

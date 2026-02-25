@@ -34,19 +34,19 @@ class TensorStoreImage:
         img_path : str
             Path to image.
         """
-        self.img_path = img_path
+        self.path = img_path
         self._load_image()
 
     def _load_image(self):
         """
         Loads image using the TensorStore library.
         """
-        bucket_name, path = util.parse_cloud_path(self.img_path)
+        bucket_name, path = util.parse_cloud_path(self.path)
         self.img = ts.open(
             {
-                "driver": get_driver(self.img_path),
+                "driver": get_driver(self.path),
                 "kvstore": {
-                    "driver": get_storage_driver(self.img_path),
+                    "driver": get_storage_driver(self.path),
                     "bucket": bucket_name,
                     "path": path,
                 },
@@ -162,6 +162,32 @@ def init_omezarr_image(
 
 
 # --- Miscellaneous ---
+def find_img_path(bucket_name, root_dir, brain_id):
+    """
+    Finds the path to a whole-brain dataset stored in a GCS bucket.
+
+    Parameters:
+    ----------
+    bucket_name : str
+        Name of the GCS bucket where the images are stored.
+    root_dir : str
+        Path to the directory in the GCS bucket where the image is expected to
+        be located.
+    dataset_name : str
+        Name of the dataset to be searched for within the subdirectories.
+
+    Returns:
+    -------
+    str
+        Path of the found dataset subdirectory within the specified GCS bucket.
+    """
+    for subdir in util.list_gcs_subdirectories(bucket_name, root_dir):
+        if brain_id in subdir:
+            img_path = f"gs://{bucket_name}/{subdir}whole-brain/fused.zarr"
+            return img_path
+    raise f"Dataset not found in {bucket_name} - {root_dir}"
+
+
 def get_driver(img_path):
     """
     Gets the storage driver needed to read the image.
