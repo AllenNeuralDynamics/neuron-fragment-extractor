@@ -12,7 +12,6 @@ from google.cloud import storage
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 
-import asyncio
 import json
 import os
 import random

@@ -142,15 +142,12 @@ def init_omezarr_image(
     )
 
     # Write metadata
-    coord_transform = [
-        {"scale": [1, 1, *reversed(voxel_size)], "type": "scale"}
-    ]
     multiscales = [{
         "axes": get_axes(),
         "datasets": get_datasets(),
         "name": "/",
         "version": "0.4",
-    }]            
+    }]
     multiscales_dict = {"multiscales": multiscales}
     root_store[".zattrs"] = json.dumps(multiscales_dict).encode("utf-8")
 
@@ -169,7 +166,7 @@ def get_axes():
 def get_datasets(voxel_size, n_levels):
     datasets = list()
     for k in n_levels:
-        voxel_size_k = [v * 2 **k for i, v in enumerate(voxel_size) if i > 1]
+        voxel_size_k = [v * 2 ** k for i, v in enumerate(voxel_size) if i > 1]
         dataset_k = {
             "coordinateTransformations": [
                 {"scale": voxel_size_k, "type": "scale"}
@@ -179,7 +176,7 @@ def get_datasets(voxel_size, n_levels):
         datasets.append(dataset_k)
     return datasets
 
-        
+
 # --- Miscellaneous ---
 def find_img_path(bucket_name, root_dir, brain_id):
     """
