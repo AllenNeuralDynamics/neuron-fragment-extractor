@@ -12,8 +12,10 @@ producing a sparse image containing only the neuron's signal.
 
 """
 
+from google.cloud import storage
 from tqdm import tqdm
 
+import asyncio
 import networkx as nx
 import numpy as np
 import os
@@ -22,27 +24,48 @@ import threading
 
 from neuron_fragment_extractor.graph_classes import SkeletonGraph
 from neuron_fragment_extractor.utils.img_util import TensorStoreImage
-from neuron_fragment_extractor.utils import img_util
+from neuron_fragment_extractor.utils import img_util, util
 
 
 def main():
     # Initializations
     gt_graph = load_skeletons()
-    src_img = TensorStoreImage(img_path)
-    dst_img = init_carveout("input.zarr", src_img.shape())
-    dst_mask = init_carveout("mask.zarr", src_img.shape())
+    src_img = TensorStoreImage(input_img_path)
+    #dst_img = init_carveout("input.zarr", src_img.shape())
+    #dst_mask = init_carveout("mask.zarr", src_img.shape())
 
     # Generate carveouts
-    carve_out_pipeline = CarveOutPipeline(gt_graph, radial_shape)
-    carve_out_pipeline.generate_raw(src_img, dst_img)
-    carve_out_pipeline.generate_mask(dst_mask)
+    #carve_out_pipeline = CarveOutPipeline(gt_graph, radial_shape)
+    #carve_out_pipeline.generate_raw(src_img, dst_img)
+    #carve_out_pipeline.generate_mask(dst_mask)
 
     # Add larger carve-out at soma
 
-    #tifffile.imwrite("/home/jupyter/raw.tiff", dst_img[0, 0, 0:512].astype(np.uint16))
-    #tifffile.imwrite("/home/jupyter/mask.tiff", dst_mask[0, 0, 0:512].astype(np.uint8))
-
     # Write metadata
+    metadata = ["SWC Names"] + gt_swc_names
+    bucket, prefix = util.parse_cloud_path(gcs_output_dir)
+    blob_name = os.path.join(prefix, "swc_names.txt")
+    write_list_to_gcs(bucket, blob_name, metadata)
+
+    # Migrate carveouts to S3
+    for name in ["input.zarr", "mask.zarr"]:
+        # Set paths
+        src_bucket, src_prefix = util.parse_cloud_path(gcs_output_dir)
+        src_path = os.path.join(src_prefix, name)
+
+        dst_bucket, dst_prefix = util.parse_cloud_path(s3_output_dir)
+        dst_path = os.path.join(dst_prefix, name)
+
+        # Migrate
+        print(f"Migrating {name} from GCS to S3")
+        asyncio.run(
+            util.migrate_omezarr_gcs_to_s3(
+                src_bucket,
+                src_path,
+                dst_bucket,
+                dst_path,
+            )
+        )
 
 
 class CarveOutPipeline:
@@ -238,7 +261,7 @@ def init_carveout(filename, img_shape):
     TensorStoreImage
         Empty image that carve-out is to be written to.
     """
-    img_path = f"{output_dir}/{brain_id}/blocks/block_000/{filename}"
+    img_path = os.path.join(gcs_output_dir, filename)
     img_util.init_omezarr_image(img_path, img_shape)
     return TensorStoreImage(os.path.join(img_path, str(0)))
 
@@ -259,25 +282,43 @@ def load_skeletons():
     """
     gt_graph = SkeletonGraph()
     for swc_name in gt_swc_names:
-        swc_path = os.path.join(gt_dir, swc_name)
+        swc_path = os.path.join(gt_swc_dir, swc_name)
         gt_graph.load(swc_path)
     return gt_graph
+
+
+def write_list_to_gcs(bucket_name, blob_name, data):
+    # Initializations
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+
+    # Convert list to newline-separated string
+    text = "\n".join(map(str, data))
+    blob.upload_from_string(text, content_type="text/plain")
 
 
 if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
-    gt_swc_names = ["00005.swc", "00013.swc"]  #["N002-802449-PP.swc"]
-    radial_shape = (32, 32, 32)   #(512, 512, 512)
-    step_size = 10
+    is_test = True
+    radial_shape = (32, 32, 32) if is_test else (512, 512, 512)
+    step_size = 10 if is_test else 128
 
     # Paths
-    #gt_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel"
-    #img_path = "gs://allen-nd-goog/from_aind/exaSPIM_802449_2025-12-16_18-17-47_training-data/whole-brain/fused.zarr/0"
-    output_dir = "gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts"
-
-    gt_dir = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/swcs/block_000/"
-    img_path = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/blocks/block_000/input.zarr/0"
+    if is_test:
+        gt_swc_names = ["00005.swc", "00013.swc"]
+        gt_swc_dir = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/swcs/block_000/"
+        input_img_path = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/blocks/block_000/input.zarr/0"
+        gcs_output_dir = "gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/754612/blocks/block_000/"
+        s3_output_dir = "s3://aind-msma-morphology-data/anna.grim/image-carveouts/754612/blocks/block_000/"
+    else:
+        gt_swc_names = ["N002-802449-PP.swc"]
+        gt_swc_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel"
+        input_img_path = img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id)
+        gcs_output_dir = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain"
+        s3_output_dir = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain"
+        assert brain_id in input_img_path
 
     # Run code
     main()
