@@ -11,7 +11,7 @@ voxel intensities from the original image are copied into the carveout,
 producing a sparse image containing only the neuron's signal.
 
 """
-
+from aind_exaspim_data_transformation.compress.imaris_to_zarr import create_downsample_levels
 from google.cloud import storage
 from tqdm import tqdm
 
@@ -65,6 +65,17 @@ def main():
             )
         )
 
+        # Generate image pyramid
+        create_downsample_levels(
+            dataset_path=dst_path,
+            base_shape=src_img.shape,
+            n_levels=n_levels,
+            downsample_factor=(2, 2, 2),
+            downsample_mode="mean",
+            shard_shape=(1, 1, 256, 256, 256),
+            chunk_shape=(64, 64, 64),
+            bucket_name="aind-msma-morphology-data"
+        )
 
 class CarveOutPipeline:
 
@@ -260,7 +271,7 @@ def init_carveout(filename, img_shape):
         Empty image that carve-out is to be written to.
     """
     img_path = os.path.join(gcs_output_dir, filename)
-    img_util.init_omezarr_image(img_path, img_shape)
+    img_util.init_omezarr_image(img_path, img_shape, n_levels=n_levels)
     return TensorStoreImage(os.path.join(img_path, str(0)))
 
 
@@ -300,6 +311,7 @@ if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
     is_test = True
+    n_levels = 3
     radial_shape = (32, 32, 32) if is_test else (512, 512, 512)
     step_size = 10 if is_test else 128
 

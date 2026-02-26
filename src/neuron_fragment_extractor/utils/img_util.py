@@ -108,7 +108,7 @@ class TensorStoreImage:
 def init_omezarr_image(
     img_path,
     img_shape,
-    chunks=(1, 1, 64, 128, 128),
+    chunks=(1, 1, 64, 64, 64),
     n_levels=3,
     voxel_size=(1.0, 0.748, 0.748),
 ):
@@ -170,7 +170,7 @@ def get_datasets(voxel_size, n_levels):
     datasets = list()
     vz, vy, vx = voxel_size
     base_scale = [1.0, 1.0, float(vz), float(vy), float(vx)]
-    for k in range(n_levels + 1):
+    for k in range(n_levels):
         # Downsample only spatial dims
         scale_k = [
             1.0,  # t
