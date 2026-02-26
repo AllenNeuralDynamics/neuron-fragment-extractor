@@ -110,7 +110,7 @@ def init_omezarr_image(
     img_shape,
     chunks=(1, 1, 64, 128, 128),
     n_levels=3,
-    voxel_size=(0.748, 0.748, 1.0),
+    voxel_size=(1.0, 0.748, 0.748),
 ):
     """
     Creates an OME-Zarr image within a given GCS prefix.
@@ -179,7 +179,6 @@ def get_datasets(voxel_size, n_levels):
             base_scale[3] * (2 ** k),  # y
             base_scale[4] * (2 ** k),  # x
         ]
-
         dataset_k = {
             "path": str(k),
             "coordinateTransformations": [
@@ -189,13 +188,11 @@ def get_datasets(voxel_size, n_levels):
                 },
                 {
                     "type": "translation",
-                    "translation": [0.0, 0.0, 0.0, 0.0, 0.0],
                 },
             ],
         }
-
         datasets.append(dataset_k)
-
+    return datasets
 
 # --- Miscellaneous ---
 def find_img_path(bucket_name, root_dir, brain_id):
