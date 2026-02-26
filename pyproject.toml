@@ -17,10 +17,14 @@ readme = "README.md"
 dynamic = ["version"]
 
 dependencies = [
+    "asyncio",
     "fastremap",
     "networkx",
     "scipy",
+    "tensorstore",
     "tqdm",
+    "zarr",
+    "aind-exaspim-data-transformation @ git+https://github.com/AllenNeuralDynamics/aind-exaspim-data-transformation.git@main"
 ]
 
 [project.optional-dependencies]
