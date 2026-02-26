@@ -11,6 +11,7 @@ voxel intensities from the original image are copied into the carveout,
 producing a sparse image containing only the neuron's signal.
 
 """
+
 from aind_exaspim_data_transformation.compress.imaris_to_zarr import create_downsample_levels
 from google.cloud import storage
 from tqdm import tqdm
