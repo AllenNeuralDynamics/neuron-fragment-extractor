@@ -31,13 +31,13 @@ def main():
     # Initializations
     gt_graph = load_skeletons()
     src_img = TensorStoreImage(input_img_path)
-    #dst_img = init_carveout("input.zarr", src_img.shape())
-    #dst_mask = init_carveout("mask.zarr", src_img.shape())
+    dst_img = init_carveout("input.zarr", src_img.shape())
+    dst_mask = init_carveout("mask.zarr", src_img.shape())
 
     # Generate carveouts
-    #carve_out_pipeline = CarveOutPipeline(gt_graph, radial_shape)
-    #carve_out_pipeline.generate_raw(src_img, dst_img)
-    #carve_out_pipeline.generate_mask(dst_mask)
+    carve_out_pipeline = CarveOutPipeline(gt_graph, radial_shape)
+    carve_out_pipeline.generate_raw(src_img, dst_img)
+    carve_out_pipeline.generate_mask(dst_mask)
 
     # Add larger carve-out at soma
 
