@@ -109,7 +109,8 @@ def init_omezarr_image(
     img_path,
     img_shape,
     chunks=(1, 1, 64, 128, 128),
-    voxel_size=(748, 748, 1000),
+    n_levels=3,
+    voxel_size=(0.748, 0.748, 1.0),
 ):
     """
     Creates an OME-Zarr image within a given GCS prefix.
@@ -165,8 +166,14 @@ def get_axes():
 
 def get_datasets(voxel_size, n_levels):
     datasets = list()
-    for k in n_levels:
-        voxel_size_k = [v * 2 ** k for i, v in enumerate(voxel_size) if i > 1]
+    voxel_size = (1, 1, *reversed(voxel_size))
+    for k in range(n_levels + 1):
+        # Set voxel size
+        voxel_size_k = list()
+        for i, v in enumerate(voxel_size):
+            voxel_size_k.append(v * 2 ** k if i > 1 else 1.0)
+
+        # Create dictionary
         dataset_k = {
             "coordinateTransformations": [
                 {"scale": voxel_size_k, "type": "scale"}
