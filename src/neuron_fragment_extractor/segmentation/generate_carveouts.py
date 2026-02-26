@@ -39,8 +39,6 @@ def main():
     carve_out_pipeline.generate_raw(src_img, dst_img)
     carve_out_pipeline.generate_mask(dst_mask)
 
-    # Add larger carve-out at soma
-
     # Write metadata
     metadata = ["SWC Names"] + gt_swc_names
     bucket, prefix = util.parse_cloud_path(gcs_output_dir)

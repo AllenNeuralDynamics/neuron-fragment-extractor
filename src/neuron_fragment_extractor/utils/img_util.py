@@ -150,7 +150,9 @@ def init_omezarr_image(
         "version": "0.4",
     }]
     multiscales_dict = {"multiscales": multiscales}
-    root_store[".zattrs"] = json.dumps(multiscales_dict).encode("utf-8")
+    root_store[".zattrs"] = json.dumps(
+        multiscales_dict, indent=4
+    ).encode("utf-8")
 
 
 def get_axes():
@@ -166,22 +168,33 @@ def get_axes():
 
 def get_datasets(voxel_size, n_levels):
     datasets = list()
-    voxel_size = (1, 1, *reversed(voxel_size))
+    vz, vy, vx = voxel_size
+    base_scale = [1.0, 1.0, float(vz), float(vy), float(vx)]
     for k in range(n_levels + 1):
-        # Set voxel size
-        voxel_size_k = list()
-        for i, v in enumerate(voxel_size):
-            voxel_size_k.append(v * 2 ** k if i > 1 else 1.0)
+        # Downsample only spatial dims
+        scale_k = [
+            1.0,  # t
+            1.0,  # c
+            base_scale[2] * (2 ** k),  # z
+            base_scale[3] * (2 ** k),  # y
+            base_scale[4] * (2 ** k),  # x
+        ]
 
-        # Create dictionary
         dataset_k = {
+            "path": str(k),
             "coordinateTransformations": [
-                {"scale": voxel_size_k, "type": "scale"}
+                {
+                    "type": "scale",
+                    "scale": scale_k,
+                },
+                {
+                    "type": "translation",
+                    "translation": [0.0, 0.0, 0.0, 0.0, 0.0],
+                },
             ],
-            "path": str(k)
         }
+
         datasets.append(dataset_k)
-    return datasets
 
 
 # --- Miscellaneous ---
