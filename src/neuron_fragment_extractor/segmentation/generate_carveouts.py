@@ -314,7 +314,7 @@ if __name__ == "__main__":
     else:
         gt_swc_names = ["N002-802449-PP.swc"]
         gt_swc_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel"
-        input_img_path = img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id)
+        input_img_path = os.path.join(img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id), str(0))
         gcs_output_dir = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain"
         s3_output_dir = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain"
         assert brain_id in input_img_path
