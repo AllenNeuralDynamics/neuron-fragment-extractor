@@ -12,7 +12,6 @@ producing a sparse image containing only the neuron's signal.
 
 """
 
-from aind_exaspim_data_transformation.compress.imaris_to_zarr import create_downsample_levels
 from google.cloud import storage
 from tqdm import tqdm
 
@@ -66,17 +65,6 @@ def main():
             )
         )
 
-        # Generate image pyramid
-        create_downsample_levels(
-            dataset_path=dst_path,
-            base_shape=src_img.shape,
-            n_levels=n_levels,
-            downsample_factor=(2, 2, 2),
-            downsample_mode="mean",
-            shard_shape=(1, 1, 256, 256, 256),
-            chunk_shape=(64, 64, 64),
-            bucket_name="aind-msma-morphology-data"
-        )
 
 class CarveOutPipeline:
 
