@@ -180,19 +180,17 @@ def get_datasets(voxel_size, n_levels):
             base_scale[4] * (2 ** k),  # x
         ]
         dataset_k = {
-            "path": str(k),
             "coordinateTransformations": [
                 {
                     "type": "scale",
                     "scale": scale_k,
                 },
-                {
-                    "type": "translation",
-                },
             ],
+            "path": str(k),
         }
         datasets.append(dataset_k)
     return datasets
+
 
 # --- Miscellaneous ---
 def find_img_path(bucket_name, root_dir, brain_id):
