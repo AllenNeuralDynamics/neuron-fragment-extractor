@@ -12,7 +12,6 @@ producing a sparse image containing only the neuron's signal.
 
 """
 
-from aind_exaspim_data_transformation.compress.imaris_to_zarr import create_downsample_levels
 from google.cloud import storage
 from tqdm import tqdm
 
@@ -66,17 +65,6 @@ def main():
             )
         )
 
-        # Generate image pyramid
-        create_downsample_levels(
-            dataset_path=dst_path,
-            base_shape=src_img.shape,
-            n_levels=n_levels,
-            downsample_factor=(2, 2, 2),
-            downsample_mode="mean",
-            shard_shape=(1, 1, 256, 256, 256),
-            chunk_shape=(64, 64, 64),
-            bucket_name="aind-msma-morphology-data"
-        )
 
 class CarveOutPipeline:
 
@@ -326,7 +314,7 @@ if __name__ == "__main__":
     else:
         gt_swc_names = ["N002-802449-PP.swc"]
         gt_swc_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel"
-        input_img_path = img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id)
+        input_img_path = os.path.join(img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id), str(0))
         gcs_output_dir = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain"
         s3_output_dir = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain"
         assert brain_id in input_img_path

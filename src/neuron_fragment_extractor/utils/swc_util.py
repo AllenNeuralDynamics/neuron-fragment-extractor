@@ -35,7 +35,7 @@ import networkx as nx
 import numpy as np
 import os
 
-from neuron_fragment_extracter.utils import util
+from neuron_fragment_extractor.utils import util
 
 
 class Reader:
