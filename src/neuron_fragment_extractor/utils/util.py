@@ -377,8 +377,9 @@ def copy_files_from_zip(src_zip, src_names, dst_zip, mode="a"):
     mode : str
         Write mode of the ZIP writer. Default is "a".
     """
-    with ZipFile(src_zip, "r") as zin, \
-         ZipFile(dst_zip, mode, compression=ZIP_DEFLATED) as zout:
+    with ZipFile(src_zip, "r") as zin, ZipFile(
+        dst_zip, mode, compression=ZIP_DEFLATED
+    ) as zout:
         for item in zin.infolist():
             if item.filename in src_names:
                 zout.writestr(item, zin.read(item.filename))
@@ -445,7 +446,7 @@ def list_zip_filenames(zip_path):
     List[str]
         Filenames contained in the specified ZIP archive.
     """
-    with ZipFile(zip_path, 'r') as z:
+    with ZipFile(zip_path, "r") as z:
         return z.namelist()
 
 
@@ -510,11 +511,7 @@ def sample_zip(src_zip_path, dst_zip_path, n):
 
 # --- Miscellaneous ---
 async def migrate_omezarr_gcs_to_s3(
-    src_bucket,
-    src_path,
-    dst_bucket,
-    dst_path,
-    concurrency=32
+    src_bucket, src_path, dst_bucket, dst_path, concurrency=32
 ):
     """
     Copies an OME-Zarr dataset from GCS to S3 without decoding/re-encoding.
@@ -530,16 +527,20 @@ async def migrate_omezarr_gcs_to_s3(
     dst_path : str
         Path to destination Zarr root.
     """
-    src = await ts.KvStore.open({
-        "driver": "gcs",
-        "bucket": src_bucket,
-        "path": src_path.rstrip("/"),
-    })
-    dst = await ts.KvStore.open({
-        "driver": "s3",
-        "bucket": dst_bucket,
-        "path": dst_path.rstrip("/"),
-    })
+    src = await ts.KvStore.open(
+        {
+            "driver": "gcs",
+            "bucket": src_bucket,
+            "path": src_path.rstrip("/"),
+        }
+    )
+    dst = await ts.KvStore.open(
+        {
+            "driver": "s3",
+            "bucket": dst_bucket,
+            "path": dst_path.rstrip("/"),
+        }
+    )
 
     keys = await src.list()
     for key in keys:
