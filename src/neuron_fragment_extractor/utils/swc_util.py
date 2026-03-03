@@ -150,9 +150,7 @@ class Reader:
             # Assign processes
             processes = list()
             for path in swc_paths:
-                processes.append(
-                    executor.submit(self.read, path)
-                )
+                processes.append(executor.submit(self.read, path))
 
             # Store results
             swc_dicts = deque()
@@ -210,9 +208,7 @@ class Reader:
             processes = list()
             for f in zip_names:
                 zip_path = os.path.join(zip_dir, f)
-                processes.append(
-                    executor.submit(self.read_from_zip, zip_path)
-                )
+                processes.append(executor.submit(self.read_from_zip, zip_path))
 
             # Store results
             swc_dicts = deque()
@@ -400,12 +396,10 @@ class Reader:
             for i in range(0, len(zip_paths), batch_size):
                 # Assign processes
                 processes = list()
-                for zip_path in zip_paths[i:i+batch_size]:
+                for zip_path in zip_paths[i: i + batch_size]:
                     processes.append(
                         executor.submit(
-                            self.read_from_gcs_zip,
-                            bucket_name,
-                            zip_path
+                            self.read_from_gcs_zip, bucket_name, zip_path
                         )
                     )
 
