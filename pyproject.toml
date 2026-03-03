@@ -19,12 +19,15 @@ dynamic = ["version"]
 dependencies = [
     "asyncio",
     "fastremap",
+    "gcsfs",
+    "google-cloud-storage",
+    "matplotlib",
     "networkx",
     "scipy",
     "tensorstore",
     "tqdm",
     "zarr",
-    "aind-exaspim-data-transformation @ git+https://github.com/AllenNeuralDynamics/aind-exaspim-data-transformation.git@main"
+    "aind-data-transfer @ git+https://github.com/AllenNeuralDynamics/aind-data-transfer.git@main"
 ]
 
 [project.optional-dependencies]
