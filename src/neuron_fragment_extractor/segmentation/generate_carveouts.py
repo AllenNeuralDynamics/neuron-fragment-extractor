@@ -14,7 +14,6 @@ producing a sparse image containing only the neuron's signal.
 
 from aind_data_transfer.transformations.ome_zarr import (
     downsample_and_store,
-    store_array,
     write_ome_ngff_metadata
 )
 from google.cloud import storage
@@ -32,7 +31,6 @@ import threading
 from neuron_fragment_extractor.graph_classes import SkeletonGraph
 from neuron_fragment_extractor.utils.img_util import TensorStoreImage
 from neuron_fragment_extractor.utils import img_util, util
-windowed_max
 
 
 def main():
@@ -45,7 +43,7 @@ def main():
     pipeline = CarveOutPipeline(
         gt_graph, radial_shape, num_levels=num_levels, step_size=step_size
     )
-    #pipeline.generate_raw("input.zarr", src_img)
+    pipeline.generate_raw("input.zarr", src_img)
     pipeline("mask.zarr", img_shape)
 
     # Write metadata
@@ -110,8 +108,14 @@ class CarveOutPipeline:
 
         # Create and store the array
         print(f"Step 1: Create OME-Zarr at {img_path} with shape {img_shape}")
-        arr = da.zeros(img_shape, chunks=self.chunks, dtype="uint16")
-        store_array(arr, root_group, "0", self.block_shape)
+        root_group.create_dataset(
+            "0",
+            shape=img_shape,
+            chunks=self.chunks,
+            dtype="uint16",
+            fill_value=None,
+            overwrite=True
+        )
 
         # Generate carve-out
         print("Step 2: Generate Image Carve-Out")
@@ -163,7 +167,6 @@ class CarveOutPipeline:
                 slices = slices_q.get()
                 if slices is stop:
                     patch_q.put(stop)
-                    break
 
                 patch = src_img.read(slices)
                 patch_q.put((slices, patch))
@@ -216,13 +219,9 @@ class CarveOutPipeline:
             """
             Gets nodes to extract patches about by traversing the graph.
             """
-            cnt = 0
             for node in self.traverse_graph():
                 if self.is_patch_contained(node, dst_img.shape()):
                     slices_q.put(self.node_to_slices(node))
-                    cnt += 1
-                if cnt > 32:
-                    break
 
             for _ in range(self.num_readers):
                 slices_q.put(stop)
