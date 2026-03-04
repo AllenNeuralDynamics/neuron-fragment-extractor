@@ -47,8 +47,8 @@ def main():
         num_levels=num_levels,
         step_size=step_size
     )
-    pipeline("input.zarr", src_img=src_img)
     pipeline("mask.zarr")
+    pipeline("input.zarr", src_img=src_img)
 
     # Write metadata
     metadata = ["SWC Names"] + input_swc_names
@@ -110,13 +110,15 @@ class CarveOutPipeline:
         img_path = os.path.join(output_gcs_dir, filename)
         bucket_name, prefix = util.parse_cloud_path(img_path)
         root_group = img_util.create_zarr_group(bucket_name, img_path)
+        print("Image Path:", img_path)
 
         # Create and store the array
-        print(f"Step 1: Create OME-Zarr at {img_path} w/ shape {self.img_shape}")
+        print(f"Step 1: Create OME-Zarr with shape {self.img_shape}")
         root_group.create_dataset(
             "0",
             shape=self.img_shape,
             chunks=self.chunks,
+            dimension_separator="/",
             dtype="uint16",
             fill_value=None,
             overwrite=True
@@ -156,7 +158,7 @@ class CarveOutPipeline:
 
         # Migrate result
         print("Step 5: Migrating from GCS to S3")
-        self.migrate_result(filename)
+        #self.migrate_result(filename)
 
     def generate_raw(self, src_img, dst_img):
 
@@ -330,31 +332,31 @@ if __name__ == "__main__":
     brain_id = "802449"
     is_single_tracing = True
     is_test = False
+
+    input_swc_names = ["00005.swc", "00013.swc"] if is_test else ["N002-802449-PP.swc"]
     num_levels = 3 if is_test else 7
     radial_shape = (32, 32, 32) if is_test else (512, 512, 512)
     step_size = 10 if is_test else 128
 
+    # Check whether to add neuron ID to output dir
+    if is_single_tracing and not is_test:
+        assert len(input_swc_names) == 1
+        neuron_id = input_swc_names[0][0:4]
+    else:
+        neuron_id = ""
+
     # Paths
     if is_test:
-        input_swc_names = ["00005.swc", "00013.swc"]
         input_swc_dir = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/swcs/block_000/"
         input_img_path = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/blocks/block_000/input.zarr/0"
         output_gcs_dir = "gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/754612/blocks/block_000/"
         output_s3_dir = "s3://aind-msma-morphology-data/anna.grim/image-carveouts/754612/blocks/block_000/"
     else:
-        input_swc_names = ["N002-802449-PP.swc"]
-        input_swc_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel"
+        input_swc_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel/"
         input_img_path = os.path.join(img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id), str(0))
-        output_gcs_dir = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain"
-        output_s3_dir = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain"
+        output_gcs_dir = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain-{neuron_id}/"
+        output_s3_dir = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain-{neuron_id}/"
         assert brain_id in input_img_path
-
-    # Check whether to update prefix name
-    if is_single_tracing and not is_test:
-        assert len(input_swc_names) == 1
-        neuron_id = input_swc_names[0][0:4]
-        output_gcs_dir += f"-{neuron_id}"
-        output_s3_dir += f"-{neuron_id}"
 
     # Run code
     main()
