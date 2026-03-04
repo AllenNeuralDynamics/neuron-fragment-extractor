@@ -8,13 +8,10 @@ Code for working with images.
 
 """
 
-from aind_data_transfer.transformations.ome_zarr import store_array
-
-import dask.array as da
 import gcsfs
-import json
 import matplotlib.pyplot as plt
 import numpy as np
+import s3fs
 import tensorstore as ts
 import zarr
 
@@ -107,113 +104,16 @@ class TensorStoreImage:
         return self.img.shape
 
 
-def init_omezarr_image(
-    img_path,
-    img_shape,
-    block_shape=(1, 1, 128, 256, 256),
-    chunks=(1, 1, 64, 128, 128),
-    n_levels=1,
-    voxel_size=(1.0, 0.748, 0.748),
-):
-    """
-    Initialize an OME-Zarr image on GCS with nested directories.
-
-    Parameters
-    ----------
-    img_path : str
-        Path to the Zarr store inside the GCS bucket.
-    img_shape : tuple of int
-        Shape of the array (T,C,Z,Y,X).
-    chunks : tuple of int
-        Chunk shape.
-    voxel_size : tuple of float
-        Physical voxel size (vz, vy, vx) in micrometers.
-
-    Returns
-    -------
-    arr : zarr.core.Array
-        Zarr array object for patch-wise writing.
-    """
-    # Create zarr group
-    print(f"Creating OME-Zarr at {img_path} with shape {img_shape}")
-    bucket_name, prefix = util.parse_cloud_path(img_path)
-    root_group = init_zarr_group(bucket_name, img_path)
-
-    # Create and store the array
-    arr = da.zeros(img_shape, chunks=chunks, dtype="uint16")
-    store_array(arr, root_group, "0", block_shape)
-
-    # Write OME-Zarr metadata manually
-    root_store = zarr.storage.FSStore(img_path, fs=gcsfs.GCSFileSystem())
-    metadata = {
-        "multiscales": [
-            {
-                "axes": metadata_axes(),
-                "datasets": metadata_datasets(voxel_size, n_levels),
-                "name": "/",
-                "version": "0.4",
-            }
-        ]
-    }
-    root_store[".zattrs"] = json.dumps(metadata, indent=4).encode("utf-8")
-
-
-def init_zarr_group(bucket_name, root_path):
-    gcs = gcsfs.GCSFileSystem(project=bucket_name)
-    store = gcsfs.GCSMap(root=root_path, gcs=gcs, check=False, create=True)
+def create_zarr_group(bucket_name, path):
+    if util.is_gcs_path(path):
+        gcs = gcsfs.GCSFileSystem(project=bucket_name)
+        store = gcsfs.GCSMap(root=path, gcs=gcs, check=False, create=True)
+    elif util.is_s3_path(path):
+        s3 = s3fs.S3FileSystem(anon=False)
+        store = s3fs.S3Map(root=path, s3=s3, check=False)
+    else:
+        raise Exception("Invalid path!")
     return zarr.open_group(store=store)
-
-
-def metadata_axes():
-    axes = [
-        {"name": "t", "type": "time", "unit": "millisecond"},
-        {"name": "c", "type": "channel"},
-        {"name": "z", "type": "space", "unit": "micrometer"},
-        {"name": "y", "type": "space", "unit": "micrometer"},
-        {"name": "x", "type": "space", "unit": "micrometer"},
-    ]
-    return axes
-
-
-def metadata_datasets(voxel_size, n_levels):
-    datasets = list()
-    vz, vy, vx = voxel_size
-    base_scale = [1.0, 1.0, float(vz), float(vy), float(vx)]
-    for k in range(n_levels):
-        dataset_k = {
-            "coordinateTransformations": metadata_transform(base_scale, k),
-            "path": str(k),
-        }
-        datasets.append(dataset_k)
-    return datasets
-
-
-def metadata_transform(base_scale, level):
-    # Compute scale
-    scale = [
-        1.0,  # t
-        1.0,  # c
-        base_scale[2] * (2**level),  # z
-        base_scale[3] * (2**level),  # y
-        base_scale[4] * (2**level),  # x
-    ]
-    return [{"scale": scale, "type": "scale"}]
-
-
-def metadata_spec(img_path, img_shape, chunks):
-    bucket, path = util.parse_cloud_path(img_path)
-    spec = {
-        "driver": get_driver(img_path),
-        "kvstore": {
-            "driver": get_storage_driver(img_path),
-            "bucket": bucket,
-            "path": path,
-        },
-        "chunks": chunks,
-        "dtype": "uint16",
-        "shape": img_shape,
-    }
-    return spec
 
 
 # --- Miscellaneous ---

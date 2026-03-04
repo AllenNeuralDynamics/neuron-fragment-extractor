@@ -21,13 +21,15 @@ dependencies = [
     "fastremap",
     "gcsfs",
     "google-cloud-storage",
+    "h5py",
     "matplotlib",
     "networkx",
     "scipy",
     "tensorstore",
     "tqdm",
     "zarr",
-    "aind-data-transfer @ git+https://github.com/AllenNeuralDynamics/aind-data-transfer.git@main"
+    "aind-data-transfer @ git+https://github.com/AllenNeuralDynamics/aind-data-transfer.git@main",
+    "segmentation-skeleton-metrics @ git+https://github.com/AllenNeuralDynamics/segmentation-skeleton-metrics.git@main"
 ]
 
 [project.optional-dependencies]
