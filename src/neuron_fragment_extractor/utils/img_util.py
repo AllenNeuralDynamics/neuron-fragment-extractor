@@ -72,7 +72,13 @@ class TensorStoreImage:
         numpy.ndarray
             Image patch.
         """
-        return self.img[slices].read().result()
+        try:
+            patch = self.img[slices].read().result()
+        except ValueError:
+            print(f"Error reading {slices} from img w/ shape {self.shape()}")
+            patch_shape = tuple(s.stop - s.start for s in slices)
+            patch = np.zeros(patch_shape)
+        return patch
 
     def write(self, patch, slices):
         """
