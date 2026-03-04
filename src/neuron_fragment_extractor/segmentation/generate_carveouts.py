@@ -41,13 +41,17 @@ def main():
 
     # Generate carveouts
     pipeline = CarveOutPipeline(
-        gt_graph, radial_shape, num_levels=num_levels, step_size=step_size
+        gt_graph,
+        img_shape,
+        radial_shape,
+        num_levels=num_levels,
+        step_size=step_size
     )
-    pipeline("input.zarr", img_shape, src_img=src_img)
-    pipeline("mask.zarr", img_shape)
+    pipeline("input.zarr", src_img=src_img)
+    pipeline("mask.zarr")
 
     # Write metadata
-    metadata = ["SWC Names"] + gt_swc_names
+    metadata = ["SWC Names"] + input_swc_names
     bucket, prefix = util.parse_cloud_path(output_gcs_dir)
     blob_name = os.path.join(prefix, "swc_names.txt")
     write_list_to_gcs(bucket, blob_name, metadata)
@@ -58,12 +62,12 @@ class CarveOutPipeline:
     def __init__(
         self,
         graph,
+        img_shape,
         radial_shape,
         block_shape=(1, 1, 256, 512, 512),
         chunks=(1, 1, 64, 128, 128),
         num_levels=1,
-        num_readers=32,
-        num_writers=1,
+        num_workers=32,
         prefetch=128,
         step_size=20,
         voxel_size=(1.0, 0.748, 0.748),
@@ -77,29 +81,30 @@ class CarveOutPipeline:
             Graph to be traversed to generate carve-out regions.
         radial_shape : Tuple[int]
             Shape of region centered about skeleton to be carved out.
-        num_reader : int, optional
-            Number of threads used to read image patches. Default is 16.
-        num_writers : int, optional
-            Number of threads used to write image patches. Default is 1.
+        num_workers : int, optional
+            Number of workers used to read and write image patches.
         prefetch : int, optional
             Number of image patches to be prefeteched. Default is 128.
         step_size : float, optional
             Distance (in microns) between carved-out regions, measured along
             graph traversal. Default is 20.
         """
+        # Check inputs
+        assert len(img_shape) == 5, "Image shape must have format (T,C,Z,Y,X)"
+
         # Instance attributes
         self.block_shape = block_shape
         self.chunks = chunks
         self.graph = graph
+        self.img_shape = img_shape
         self.num_levels = num_levels
-        self.num_readers = num_readers
-        self.num_writers = num_writers
+        self.num_workers = num_workers
         self.prefetch = prefetch
         self.radial_shape = radial_shape
         self.step_size = step_size
         self.voxel_size = voxel_size
 
-    def __call__(self, filename, img_shape, src_img=None):
+    def __call__(self, filename, src_img=None):
         # Create zarr group
         print("\nImage Name:", filename)
         img_path = os.path.join(output_gcs_dir, filename)
@@ -107,10 +112,10 @@ class CarveOutPipeline:
         root_group = img_util.create_zarr_group(bucket_name, img_path)
 
         # Create and store the array
-        print(f"Step 1: Create OME-Zarr at {img_path} with shape {img_shape}")
+        print(f"Step 1: Create OME-Zarr at {img_path} w/ shape {self.img_shape}")
         root_group.create_dataset(
             "0",
-            shape=img_shape,
+            shape=self.img_shape,
             chunks=self.chunks,
             dtype="uint16",
             fill_value=None,
@@ -155,57 +160,36 @@ class CarveOutPipeline:
 
     def generate_raw(self, src_img, dst_img):
 
-        def traverse():
+        def producer():
             for node in self.traverse_graph():
-                if self.is_patch_contained(node, dst_img.shape()):
+                if self.is_patch_contained(node):
                     slices_q.put(self.node_to_slices(node))
-            for _ in range(self.num_readers):
-                slices_q.put(stop)
 
-        def reader():
+            for _ in range(self.num_workers):
+                slices_q.put(None)
+
+        def consumer():
             while True:
                 slices = slices_q.get()
-                if slices is stop:
-                    patch_q.put(stop)
+                if slices is None:
+                    break
 
                 patch = src_img.read(slices)
-                patch_q.put((slices, patch))
-
-        def writer():
-            finished_readers = 0
-            while True:
-                # Check whether to stop
-                item = patch_q.get()
-                if item is stop:
-                    finished_readers += 1
-                    if finished_readers == self.num_readers:
-                        break
-                    continue
-
-                # Write patch
-                slices, patch = item
-                dst_img.write(patch, slices)
+                with write_lock:
+                    dst_img.write(patch, slices)
                 pbar.update(1)
 
         # Initializations
         slices_q = queue.Queue(maxsize=self.prefetch)
-        patch_q = queue.Queue(maxsize=self.prefetch)
-        total_patches = self.count_patches(dst_img.shape())
-        pbar = tqdm(total=total_patches, desc="Raw")
-        stop = object()
+        pbar = tqdm(total=self.count_patches(), desc="Raw")
+        threads = [threading.Thread(target=producer)]
+        for _ in range(self.num_workers):
+            threads.append(threading.Thread(target=consumer))
 
         # Start threads
-        threads = list()
-        threads.append(threading.Thread(target=traverse, daemon=True))
-        for _ in range(self.num_readers):
-            threads.append(threading.Thread(target=reader, daemon=True))
-
-        for _ in range(self.num_writers):
-            threads.append(threading.Thread(target=writer, daemon=True))
-
+        write_lock = threading.Lock()
         for t in threads:
             t.start()
-
         for t in threads:
             t.join()
 
@@ -214,61 +198,53 @@ class CarveOutPipeline:
         Generates a binary mask that indicates which voxels are contained in
         the image carve-out.
         """
-
-        def traverse():
-            """
-            Gets nodes to extract patches about by traversing the graph.
-            """
+        def producer():
             for node in self.traverse_graph():
-                if self.is_patch_contained(node, dst_img.shape()):
+                if self.is_patch_contained(node):
                     slices_q.put(self.node_to_slices(node))
 
-            for _ in range(self.num_readers):
-                slices_q.put(stop)
+            for _ in range(self.num_workers):
+                slices_q.put(None)
 
-        def writer():
-            finished_readers = 0
+        def consumer():
             mask_patch = np.ones(self.radial_shape, dtype=np.uint16)
             while True:
                 slices = slices_q.get()
-                if slices is stop:
-                    finished_readers += 1
-                    if finished_readers == self.num_readers:
-                        break
-                    continue
+                if slices is None:
+                    break
 
-                # Write patch
-                dst_img.write(mask_patch, slices)
+                with write_lock:
+                    dst_img.write(mask_patch, slices)
                 pbar.update(1)
 
-        # Initialize queues
-        pbar = tqdm(total=self.count_patches(dst_img.shape()), desc="Mask")
+        # Initializations
         slices_q = queue.Queue(maxsize=self.prefetch)
-        stop = object()
+        pbar = tqdm(total=self.count_patches(), desc="Mask")
+        threads = [threading.Thread(target=producer)]
+        for _ in range(self.num_workers):
+            threads.append(threading.Thread(target=consumer))
 
         # Start threads
-        threads = [threading.Thread(target=traverse, daemon=True)]
-        for _ in range(self.num_writers):
-            threads.append(threading.Thread(target=writer, daemon=True))
-
+        write_lock = threading.Lock()
         for t in threads:
             t.start()
-
         for t in threads:
             t.join()
 
     # --- Helpers ---
-    def count_patches(self, img_shape):
+    def count_patches(self):
         cnt = 0
         for node in self.traverse_graph():
-            if self.is_patch_contained(node, img_shape):
+            if self.is_patch_contained(node):
                 cnt += 1
         return cnt
 
-    def is_patch_contained(self, node, img_shape):
-        img_shape = img_shape[2:] if len(img_shape) == 5 else img_shape
+    def is_patch_contained(self, node):
         voxel = self.graph.node_voxel(node)
-        return img_util.is_patch_contained(voxel, self.radial_shape, img_shape)
+        is_contained = img_util.is_patch_contained(
+            voxel, self.radial_shape, self.img_shape[2:]
+        )
+        return is_contained
 
     def migrate_result(self, name):
         # Set paths
@@ -332,8 +308,8 @@ def load_skeletons():
         Graph with specified SWC files loaded.
     """
     gt_graph = SkeletonGraph()
-    for swc_name in gt_swc_names:
-        swc_path = os.path.join(gt_swc_dir, swc_name)
+    for swc_name in input_swc_names:
+        swc_path = os.path.join(input_swc_dir, swc_name)
         gt_graph.load(swc_path)
     return gt_graph
 
@@ -352,6 +328,7 @@ def write_list_to_gcs(bucket_name, blob_name, data):
 if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
+    is_single_tracing = True
     is_test = False
     num_levels = 3 if is_test else 7
     radial_shape = (32, 32, 32) if is_test else (512, 512, 512)
@@ -359,18 +336,25 @@ if __name__ == "__main__":
 
     # Paths
     if is_test:
-        gt_swc_names = ["00005.swc", "00013.swc"]
-        gt_swc_dir = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/swcs/block_000/"
+        input_swc_names = ["00005.swc", "00013.swc"]
+        input_swc_dir = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/swcs/block_000/"
         input_img_path = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/blocks/block_000/input.zarr/0"
         output_gcs_dir = "gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/754612/blocks/block_000/"
         output_s3_dir = "s3://aind-msma-morphology-data/anna.grim/image-carveouts/754612/blocks/block_000/"
     else:
-        gt_swc_names = ["N002-802449-PP.swc"]
-        gt_swc_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel"
+        input_swc_names = ["N002-802449-PP.swc"]
+        input_swc_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel"
         input_img_path = os.path.join(img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id), str(0))
         output_gcs_dir = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain"
         output_s3_dir = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain"
         assert brain_id in input_img_path
+
+    # Check whether to update prefix name
+    if is_single_tracing and not is_test:
+        assert len(input_swc_names) == 1
+        neuron_id = input_swc_names[0][0:4]
+        output_gcs_dir += f"-{neuron_id}"
+        output_s3_dir += f"-{neuron_id}"
 
     # Run code
     main()
