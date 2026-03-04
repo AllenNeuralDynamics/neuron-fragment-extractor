@@ -43,7 +43,7 @@ def main():
     pipeline = CarveOutPipeline(
         gt_graph, radial_shape, num_levels=num_levels, step_size=step_size
     )
-    #pipeline.generate_raw("input.zarr", src_img)
+    pipeline.generate_raw("input.zarr", src_img)
     pipeline("mask.zarr", img_shape)
 
     # Write metadata
