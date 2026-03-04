@@ -43,7 +43,7 @@ def main():
     pipeline = CarveOutPipeline(
         gt_graph, radial_shape, num_levels=num_levels, step_size=step_size
     )
-    pipeline.generate_raw("input.zarr", src_img)
+    pipeline("input.zarr", img_shape, src_img=src_img)
     pipeline("mask.zarr", img_shape)
 
     # Write metadata
@@ -59,7 +59,7 @@ class CarveOutPipeline:
         self,
         graph,
         radial_shape,
-        block_shape=(1, 1, 128, 256, 256),
+        block_shape=(1, 1, 256, 512, 512),
         chunks=(1, 1, 64, 128, 128),
         num_levels=1,
         num_readers=32,
@@ -184,7 +184,7 @@ class CarveOutPipeline:
 
                 # Write patch
                 slices, patch = item
-                dst_img[slices] = patch
+                dst_img.write(patch, slices)
                 pbar.update(1)
 
         # Initializations
@@ -352,20 +352,19 @@ def write_list_to_gcs(bucket_name, blob_name, data):
 if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
-    is_test = True
+    is_test = False
+    num_levels = 3 if is_test else 7
     radial_shape = (32, 32, 32) if is_test else (512, 512, 512)
     step_size = 10 if is_test else 128
 
     # Paths
     if is_test:
-        num_levels = 3
         gt_swc_names = ["00005.swc", "00013.swc"]
         gt_swc_dir = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/swcs/block_000/"
         input_img_path = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/blocks/block_000/input.zarr/0"
         output_gcs_dir = "gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/754612/blocks/block_000/"
         output_s3_dir = "s3://aind-msma-morphology-data/anna.grim/image-carveouts/754612/blocks/block_000/"
     else:
-        num_levels = 7
         gt_swc_names = ["N002-802449-PP.swc"]
         gt_swc_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel"
         input_img_path = os.path.join(img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id), str(0))
