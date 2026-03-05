@@ -11,15 +11,17 @@ image carve-outs
 
 from segmentation_skeleton_metrics.data_handling.graph_loading import (
     GraphLoader,
-    LabelHandler
+    LabelHandler,
 )
 from segmentation_skeleton_metrics.utils.img_util import TensorStoreImage
+from segmentation_skeleton_metrics.utils import util
 from tqdm import tqdm
 
 import networkx as nx
 
 
 def main():
+    util.mkdir(output_dir)
     for graph in tqdm(load_skeletons(), desc="Extract Skeletons"):
         remove_excluded_nodes(graph)
         remove_small_components(graph)
@@ -27,10 +29,13 @@ def main():
 
 
 def load_skeletons():
+    label_handler = LabelHandler()
     mask = TensorStoreImage(mask_path)
     graph_loader = GraphLoader(
         anisotropy=(0.748, 0.748, 1.0),
+        fix_label_misalignments=False,
         is_groundtruth=True,
+        label_handler=label_handler,
         label_mask=mask,
         use_anisotropy=True,
     )
