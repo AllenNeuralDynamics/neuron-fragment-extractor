@@ -496,6 +496,7 @@ def run(
         graph,
         src.shape(),
         radial_shape,
+        output_gcs_dir,
         num_levels=num_levels,
     )
     pipeline("mask.zarr")
