@@ -20,26 +20,29 @@ from neuron_fragment_extractor.utils import util
 # --- IO Utils ---
 class TensorStoreImage:
     """
-    Class that reads an image with TensorStore library.
+    Class that uses the TensorStore library for image IO operations.
     """
 
     def __init__(self, img_path=None, spec=None):
         """
-        Instantiates a TensorStoreReader object.
+        Instantiates a TensorStoreImage object.
 
         Parameters
         ----------
         img_path : str
             Path to image.
+        spec : dict
+            TensorStore specification describing how the dataset is stored and
+            accessed (e.g., driver, kvstore, metadata).
         """
         assert img_path or spec
-        self.spec = spec or self.create_spec(img_path)
+        self.spec = spec or self.get_spec(img_path)
         self.img = ts.open(self.spec).result()
 
     # --- Core Routines ---
     def read(self, slices):
         """
-        Reads the patch specified by the given image slices.
+        Reads the image patch specified by the given slices.
 
         Parameters
         ----------
@@ -55,8 +58,7 @@ class TensorStoreImage:
             patch = self.img[slices].read().result()
         except ValueError:
             print(f"Error reading {slices} from img w/ shape {self.shape()}")
-            patch_shape = tuple(s.stop - s.start for s in slices)
-            patch = np.zeros(patch_shape)
+            patch = np.zeros(tuple(s.stop - s.start for s in slices))
         return patch
 
     def write(self, patch, slices):
@@ -68,17 +70,26 @@ class TensorStoreImage:
         patch : numpy.ndarray
             Image patch to be written.
         slices : Tuple[slice]
-            Slice objects specifying the region to extract from the image.
-
-        Returns
-        -------
-        numpy.ndarray
-            Image patch.
+            Slice objects specifying the region to write to.
         """
         self.img[slices] = patch
 
     # --- Helpers ---
-    def create_spec(self, img_path):
+    def get_spec(self, img_path):
+        """
+        Creates a TensorStore specification for opening the image at the
+        given path.
+
+        Parameters
+        ----------
+        img_path : str
+            Path to image to be opened.
+
+        Returns
+        -------
+        spec : dict
+            TensorStore specification for opening the image at the given path.
+        """
         bucket_name, relative_path = util.parse_cloud_path(img_path)
         spec = {
             "driver": get_driver(img_path),
@@ -97,7 +108,7 @@ class TensorStoreImage:
 
     def shape(self):
         """
-        Gets the shape of image.
+        Gets the shape of the image.
 
         Returns
         -------
@@ -109,6 +120,23 @@ class TensorStoreImage:
 
 # --- OME-Zarr Metadata ---
 def create_zattrs(num_levels, voxel_size=(1.0, 0.748, 0.748)):
+    """
+    Creates the .zattrs metadata dictionary for a multiscale OME-Zarr image.
+
+    Parameters
+    ----------
+    num_levels : int
+        Number of multiscale resolution levels to include in the metadata.
+    voxel_size : Tuple[float], optional
+        Physical voxel size for the highest resolution level. Default is
+        (1.0, 0.748, 0.748).
+
+    Returns
+    -------
+    dict
+        Dictionary formatted according to the OME-Zarr multiscales
+        specification.
+    """
     multiscales = [{
         "axes": get_axes(),
         "datasets": get_datasets(num_levels, voxel_size),
@@ -119,6 +147,15 @@ def create_zattrs(num_levels, voxel_size=(1.0, 0.748, 0.748)):
 
 
 def get_axes():
+    """
+    Gets the OME-Zarr axis metadata for a 5D image.
+
+    Returns
+    -------
+    List[Dict[str, str]]
+        Axes metadata dictionaries compliant with the OME-Zarr multiscales
+        specification.
+    """
     axes = [
         {"name": "t", "type": "time", "unit": "millisecond"},
         {"name": "c", "type": "channel"},
@@ -130,6 +167,24 @@ def get_axes():
 
 
 def get_datasets(num_levels, voxel_size):
+    """
+    Constructs dataset metadata entries for each multiscale level in an
+    OME-Zarr image.
+
+    Parameters
+    ----------
+    num_levels : int
+        Number of multiscale resolution levels to generate. Each level
+        corresponds to a progressively downsampled version of the image.
+    voxel_size : Tuple[float]
+        Physical voxel size for the highest resolution level.
+
+    Returns
+    -------
+    List[dict]
+        Dataset metadata dictionaries conforming to the OME-Zarr multiscales
+        specification.
+    """
     datasets = list()
     vz, vy, vx = voxel_size
     base_scale = [1.0, 1.0, float(vz), float(vy), float(vx)]
