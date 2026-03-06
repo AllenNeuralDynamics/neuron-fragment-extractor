@@ -99,7 +99,7 @@ class CarveOutPipeline:
 
         # Core data structures
         self.graph = graph
-        self.centers = self.list_centers(step_size)[0:32]
+        self.centers = self.list_centers(step_size)[0:512]
 
     def __call__(self, filename, src_img=None):
         # Create and store the array
@@ -118,11 +118,10 @@ class CarveOutPipeline:
         # Generate image pyramid
         print("Step 3: Generate Image Pyramid")
         self.generate_pyramid(root_path)
-        stop
 
         # Write metadata
         print("Step 4: Write MetaData")
-        write_ome_ngff_metadata()
+        #write_ome_ngff_metadata()
 
         # Migrate result
         print("Step 5: Migrating from GCS to S3")
