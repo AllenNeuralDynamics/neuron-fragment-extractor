@@ -24,7 +24,6 @@ import networkx as nx
 import numpy as np
 import os
 import queue
-import threading
 
 from neuron_fragment_extractor.graph_classes import SkeletonGraph
 from neuron_fragment_extractor.utils.img_util import TensorStoreImage
@@ -140,7 +139,7 @@ class CarveOutPipeline:
             """
             while True:
                 # Get slice
-                slices = slices_q.get()
+                slices = slices_queue.get()
                 if slices is None:
                     break
 
@@ -152,19 +151,21 @@ class CarveOutPipeline:
         # Initializations
         mask_patch = np.ones(self.radial_shape, dtype=np.uint16)
         pbar = tqdm(total=len(self.centers), desc="   Mask")
-
-        # Slice queue
-        slices_q = queue.Queue(maxsize=self.prefetch)
-        for node in self.centers:
-            slices_q.put(self.node_to_slices(node))
-        for _ in range(self.num_workers):
-            slices_q.put(None)
-
-        # Write image
         write_lock = Lock()
+
+        # Start workers
         threads = [Thread(target=worker) for _ in range(self.num_workers)]
         for t in threads:
             t.start()
+
+        # Populate queue
+        slices_queue = queue.Queue(maxsize=self.prefetch)
+        for node in self.centers:
+            slices_queue.put(self.node_to_slices(node))
+        for _ in range(self.num_workers):
+            slices_queue.put(None)
+
+        # Wait until completed
         for t in threads:
             t.join()
 
@@ -173,17 +174,9 @@ class CarveOutPipeline:
         Generates an image carve out by copying image patches from "src_img"
         to "dst_img" that are centered about the skeleton.
         """
-
-        def producer():
-            for node in self.centers:
-                slices_q.put(self.node_to_slices(node))
-
-            for _ in range(self.num_workers):
-                slices_q.put(None)
-
-        def consumer():
+        def worker():
             while True:
-                slices = slices_q.get()
+                slices = slices_queue.get()
                 if slices is None:
                     break
 
@@ -193,16 +186,22 @@ class CarveOutPipeline:
                 pbar.update(1)
 
         # Initializations
-        slices_q = queue.Queue(maxsize=self.prefetch)
         pbar = tqdm(total=len(self.centers), desc="   Raw")
-        threads = [threading.Thread(target=producer)]
-        for _ in range(self.num_workers):
-            threads.append(threading.Thread(target=consumer))
+        write_lock = Lock()
 
-        # Start threads
-        write_lock = threading.Lock()
+        # Start workers
+        threads = [Thread(target=worker) for _ in range(self.num_workers)]
         for t in threads:
             t.start()
+
+        # Populate queue
+        slices_queue = queue.Queue(maxsize=self.prefetch)
+        for node in self.centers:
+            slices_queue.put(self.node_to_slices(node))
+        for _ in range(self.num_workers):
+            slices_queue.put(None)
+
+        # Wait until completion
         for t in threads:
             t.join()
 
@@ -392,7 +391,7 @@ if __name__ == "__main__":
     )
     num_levels = 3 if is_test else 7
     radial_shape = (32, 32, 32) if is_test else (512, 512, 512)
-    step_size = 16 if is_test else 128
+    step_size = 16 if is_test else 256
 
     # Check whether to add neuron ID to output dir
     if is_single_tracing and not is_test:
