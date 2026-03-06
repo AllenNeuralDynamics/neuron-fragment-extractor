@@ -12,6 +12,7 @@ from google.cloud import storage
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 
+import fsspec
 import json
 import os
 import random
@@ -136,6 +137,21 @@ def read_json_from_gcs(bucket_name, blob_path):
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(blob_path)
     return json.loads(blob.download_as_text())
+
+
+def write_json_to_gcs(my_dict, path):
+    """
+    Writes the dictionary to a JSON at the given path.
+
+    Parameters
+    ----------
+    my_dict : dict
+        Dictionary to be written to a JSON.
+    path : str
+        Path to location in GCS bucket that JSON is to be written to.
+    """
+    with fsspec.open(path, "w") as f:
+        json.dump(my_dict, f, indent=4)
 
 
 # --- S3 Utils ---

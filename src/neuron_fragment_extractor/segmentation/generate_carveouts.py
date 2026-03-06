@@ -12,7 +12,6 @@ producing a sparse image containing only the neuron's signal.
 
 """
 
-from google.cloud import storage
 from threading import Lock, Thread
 from tqdm import tqdm
 
@@ -29,33 +28,6 @@ from neuron_fragment_extractor.utils.img_util import TensorStoreImage
 from neuron_fragment_extractor.utils import img_util, util
 
 
-def main():
-    """
-    Execute the full image carve-out generation pipeline.
-    """
-    # Initializations
-    gt_graph = load_skeletons()
-    src_img = TensorStoreImage(input_img_path)
-
-    # Generate carveouts
-    pipeline = CarveOutPipeline(
-        gt_graph,
-        src_img.shape(),
-        radial_shape,
-        chunks=chunks,
-        num_levels=num_levels,
-        step_size=step_size,
-    )
-    pipeline("mask.zarr")
-    pipeline("input.zarr", src_img=src_img)
-
-    # Write metadata
-    metadata = ["SWC Names"] + input_swc_names
-    bucket, prefix = util.parse_cloud_path(output_gcs_dir)
-    blob_name = os.path.join(prefix, "swc_names.txt")
-    write_list_to_gcs(bucket, blob_name, metadata)
-
-
 class CarveOutPipeline:
     """
     Pipeline for generating skeleton-centered image carve-outs and
@@ -67,11 +39,11 @@ class CarveOutPipeline:
         graph,
         img_shape,
         radial_shape,
-        chunks=(1, 1, 128, 256, 256),
+        output_gcs_dir,
+        chunks=(1, 1, 256, 256, 256),
         num_levels=1,
         num_workers=32,
         prefetch=128,
-        step_size=20,
         voxel_size=(1.0, 0.748, 0.748),
     ):
         """
@@ -85,38 +57,42 @@ class CarveOutPipeline:
             Shape of image carve out.
         radial_shape : Tuple[int]
             Shape of region centered about skeleton to be carved out.
+        output_gcs_dir : str
+            Path to GCS directory that image carveouts are written to.
         chunks : Tuple[int], optional
             Chunk shape used to write OME-Zarr image. Default is (1, 1, 128
             128, 128).
+        num_levels : int, optional
+            Number of image pyramid levels in the OME-Zarr directory. Default
+            is 7.
         num_workers : int, optional
             Number of workers used to read and write image patches. Default is
             32.
         prefetch : int, optional
             Number of image patches to be prefeteched. Default is 128.
-        step_size : float, optional
-            Distance (in microns) between carved-out regions, measured along
-            graph traversal. Default is 20.
         voxel_size : Tuple[float], optional
             Physical voxel size for the highest resolution level. Default is
             (1.0, 0.748, 0.748).
         """
         # Check inputs
         assert len(img_shape) == 5, "Image shape must have format (T,C,Z,Y,X)"
+        assert len(set(radial_shape)) == 1, "Radial shape must be a cube"
 
         # Instance attributes
         self.chunks = chunks
         self.img_shape = img_shape
         self.num_levels = num_levels
         self.num_workers = num_workers
+        self.output_gcs_dir = output_gcs_dir
         self.prefetch = prefetch
         self.radial_shape = radial_shape
         self.voxel_size = voxel_size
 
         # Core data structures
         self.graph = graph
-        self.centers = self.list_centers(step_size)[0:64]
+        self.centers = self.list_centers()
 
-    def __call__(self, filename, src_img=None):
+    def __call__(self, filename, src=None):
         """
         Executes the full carve-out workflow for a given output file, which
         involves the following steps:
@@ -130,39 +106,40 @@ class CarveOutPipeline:
         ----------
         filename : str
             Name of the output Zarr directory.
-        src_img : TensorStoreImage, optional
+        src : TensorStoreImage, optional
             Source image to read from when generating raw image carve-outs.
         """
         # Create and store the array
         print(f"\nStep 1: Create OME-Zarr with shape={self.img_shape}")
-        root_path = os.path.join(output_gcs_dir, filename)
+        root_path = os.path.join(self.output_gcs_dir, filename)
         spec = self.get_tensorstore_spec(root_path, level=0)
-        dst_img = TensorStoreImage(spec=spec)
+        dst = TensorStoreImage(spec=spec)
         self.write_zattrs(root_path)
 
         # Generate carve-out
         print("Step 2: Generate Image Carve-Out")
         if filename == "mask.zarr":
-            self.generate_mask(dst_img)
+            self.generate_mask(dst)
         else:
-            self.generate_raw(src_img, dst_img)
+            self.generate_raw(src, dst)
 
         # Generate image pyramid
         print("Step 3: Generate Image Pyramid")
         self.generate_pyramid(root_path)
 
-        # Migrate result
-        print("Step 4: Migrating from GCS to S3")
-        # self.migrate_result(filename)
-
-    def generate_mask(self, dst_img):
+    def generate_mask(self, dst):
         """
         Generates a binary mask that indicates which voxels are contained in
         the image carve-out.
+
+        Parameters
+        ----------
+        dst : TensorStoreImage
+            Image to be written to.
         """
         def worker():
             """
-            Writes an array of ones to the mask (i.e. dst_img).
+            Writes an array of ones to the mask (i.e. dst).
             """
             while True:
                 # Get slice
@@ -172,7 +149,7 @@ class CarveOutPipeline:
 
                 # Write patch
                 with write_lock:
-                    dst_img.write(mask_patch, slices)
+                    dst.write(mask_patch, slices)
                 pbar.update(1)
 
         # Initializations
@@ -404,22 +381,17 @@ class CarveOutPipeline:
         )
         return is_contained
 
-    def list_centers(self, step_size):
+    def list_centers(self):
         """
         Generates nodes along skeletons used to create the image carve out.
 
-        Parameters
-        ----------
-        step_size : float
-            Distance (in microns) between carved-out regions, measured along
-            graph traversal.
-
         Returns
         -------
-        Iterator[int]
+        List[int]
             Node IDs used to create image carve out.
         """
         centers = list()
+        step_size = self.radial_shape[0] / 4
         for nodes in map(list, nx.connected_components(self.graph)):
             root = nodes[0]
             queue = [(root, np.inf)]
@@ -439,32 +411,6 @@ class CarveOutPipeline:
                         visited.add(j)
             centers.append(i)
         return [c for c in centers if self.is_patch_contained(c)]
-
-    def migrate_result(self, name):
-        """
-        Migrates the image carve out from GCS to S3.
-
-        Parameters
-        ----------
-        name : str
-            Name of the OME-Zarr image.
-        """
-        # Set paths
-        src_bucket, src_prefix = util.parse_cloud_path(output_gcs_dir)
-        src_path = os.path.join(src_prefix, name)
-
-        dst_bucket, dst_prefix = util.parse_cloud_path(output_s3_dir)
-        dst_path = os.path.join(dst_prefix, name)
-
-        # Migrate
-        asyncio.run(
-            util.migrate_omezarr_gcs_to_s3(
-                src_bucket,
-                src_path,
-                dst_bucket,
-                dst_path,
-            )
-        )
 
     def node_to_slices(self, node, level=0):
         """
@@ -487,8 +433,7 @@ class CarveOutPipeline:
         """
         voxel = [u // 2**level for u in self.graph.node_voxel(node)]
         shape = [s // 2**level for s in self.radial_shape]
-        slices = img_util.get_center_slices(voxel, shape)
-        return slices
+        return img_util.get_center_slices(voxel, shape)
 
     def write_zattrs(self, root_path):
         """
@@ -506,70 +451,88 @@ class CarveOutPipeline:
             f.write(json.dumps(zattrs, indent=4))
 
 
-def load_skeletons():
+# --- Helpers ---
+def load_skeletons(swc_dir, swc_names):
     """
     Loads the SWC files into a SkeletonGraph.
 
     Parameters
     ----------
-    swc_pointer : str
-        Path to SWC files to be loaded.
+    swc_dir : str
+        Path to directory containign SWC files to be loaded.
+    swc_names : List[str]
+        Names of SWC files to be loaded.
 
     Returns
     -------
     graph : SkeletonGraph
         Graph with specified SWC files loaded.
     """
-    gt_graph = SkeletonGraph()
-    for swc_name in input_swc_names:
-        swc_path = os.path.join(input_swc_dir, swc_name)
-        gt_graph.load(swc_path)
-    return gt_graph
+    graph = SkeletonGraph()
+    for swc_name in swc_names:
+        graph.load(os.path.join(swc_dir, swc_name))
+    return graph
 
 
-def write_list_to_gcs(bucket_name, blob_name, data):
+# --- Main Routine ---
+def main(
+    input_img_path,
+    input_swc_dir,
+    input_swc_names,
+    output_gcs_dir,
+    output_s3_dir,
+    num_levels=7,
+    radial_shape=(512, 512, 512)
+):
     """
-    Writes a list to a Google Cloud Storage (GCS) object as a text file.
-
-    Parameters
-    ----------
-    bucket_name : str
-        Name of the GCS bucket where the blob will be stored.
-    blob_name : str
-        Path or name of the blob within the bucket.
-    data : list
-        List of items to write.
+    Execute the full image carve-out generation pipeline.
     """
-    # Initializations
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
+    # Load data
+    graph = load_skeletons(input_swc_dir, input_swc_names)
+    src = TensorStoreImage(input_img_path)
 
-    # Convert list to newline-separated string
-    text = "\n".join(map(str, data))
-    blob.upload_from_string(text, content_type="text/plain")
+    # Generate carveouts
+    pipeline = CarveOutPipeline(
+        graph,
+        src.shape(),
+        radial_shape,
+        num_levels=num_levels,
+    )
+    pipeline("mask.zarr")
+    pipeline("input.zarr", src=src)
+
+    # Write metadata
+    metadata = {
+        "input_img_path": input_img_path,
+        "input_swc_dir": input_swc_dir,
+        "input_swc_names": input_swc_names,
+        "radial_shape": radial_shape,
+    }
+    path = os.path.join(output_gcs_dir, "metadata.json")
+    util.write_json_to_gcs(metadata, path)
+
+    # Migrate results
+    src_bucket, src_prefix = util.parse_cloud_path(output_gcs_dir)
+    dst_bucket, dst_prefix = util.parse_cloud_path(output_s3_dir)
+    asyncio.run(
+        util.migrate_omezarr_gcs_to_s3(
+            src_bucket,
+            src_prefix,
+            dst_bucket,
+            dst_prefix,
+        )
+    )
 
 
 if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
-    is_single_tracing = True
     is_test = True
 
-    input_swc_names = (
-        ["00005.swc"] if is_test else ["N002-802449-PP.swc"]
-    )
-    chunks = (1, 1, 256, 256, 256) if is_test else (1, 1, 512, 512, 512)
+    input_swc_names = ["00005.swc"] if is_test else ["-N002-802449-PP.swc"]
+    neuron_id = input_swc_names[0][0:4] if len(input_swc_names) == 1 else ""
     num_levels = 3 if is_test else 7
     radial_shape = (32, 32, 32) if is_test else (512, 512, 512)
-    step_size = 4 if is_test else 64
-
-    # Check whether to add neuron ID to output dir
-    if is_single_tracing and not is_test:
-        assert len(input_swc_names) == 1
-        neuron_id = input_swc_names[0][0:4]
-    else:
-        neuron_id = ""
 
     # Paths
     if is_test:
@@ -580,9 +543,16 @@ if __name__ == "__main__":
     else:
         input_swc_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel/"
         input_img_path = os.path.join(img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id), str(0))
-        output_gcs_dir = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain-{neuron_id}/"
-        output_s3_dir = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain-{neuron_id}/"
-        assert brain_id in input_img_path
+        output_gcs_dir = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain{neuron_id}/"
+        output_s3_dir = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain{neuron_id}/"
 
     # Run code
-    main()
+    main(
+        input_img_path,
+        input_swc_dir,
+        input_swc_names,
+        output_gcs_dir,
+        output_s3_dir,
+        num_levels=num_levels,
+        radial_shape=radial_shape
+    )
