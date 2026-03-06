@@ -56,6 +56,10 @@ def main():
 
 
 class CarveOutPipeline:
+    """
+    Pipeline for generating skeleton-centered image carve-outs and
+    multiscale OME-Zarr pyramids from large volumetric images.
+    """
 
     def __init__(
         self,
@@ -112,6 +116,22 @@ class CarveOutPipeline:
         self.centers = self.list_centers(step_size)
 
     def __call__(self, filename, src_img=None):
+        """
+        Executes the full carve-out workflow for a given output file, which
+        involves the following steps:
+            1. Create an OME-Zarr array and write ".zattrs".
+            2. Generate image carve-out
+            3. Generate a multiscale image pyramid.
+            4. Migrate the resulting Zarr directory to another storage
+               location such as S3.
+
+        Parameters
+        ----------
+        filename : str
+            Name of the output Zarr directory.
+        src_img : TensorStoreImage, optional
+            Source image to read from when generating raw image carve-outs.
+        """
         # Create and store the array
         print(f"\nStep 1: Create OME-Zarr with shape={self.img_shape}")
         root_path = os.path.join(output_gcs_dir, filename)
@@ -470,6 +490,15 @@ class CarveOutPipeline:
         return slices
 
     def write_zattrs(self, root_path):
+        """
+        Writes the ".zattrs" metadata file for an OME-Zarr dataset to GCS.
+
+        Parameters
+        ----------
+        root_path : str
+            GCS path to the root of the Zarr directory where ".zattrs" should
+            be written.
+        """
         fs = gcsfs.GCSFileSystem(project="allen-nd-goog")
         with fs.open(f"{root_path}/.zattrs", "w") as f:
             zattrs = img_util.create_zattrs(self.num_levels)
@@ -498,6 +527,18 @@ def load_skeletons():
 
 
 def write_list_to_gcs(bucket_name, blob_name, data):
+    """
+    Writes a list to a Google Cloud Storage (GCS) object as a text file.
+
+    Parameters
+    ----------
+    bucket_name : str
+        Name of the GCS bucket where the blob will be stored.
+    blob_name : str
+        Path or name of the blob within the bucket.
+    data : list
+        List of items to write.
+    """
     # Initializations
     client = storage.Client()
     bucket = client.bucket(bucket_name)
