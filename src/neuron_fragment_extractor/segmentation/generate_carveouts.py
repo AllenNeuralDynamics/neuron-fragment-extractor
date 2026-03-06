@@ -100,7 +100,7 @@ class CarveOutPipeline:
 
         # Core data structures
         self.graph = graph
-        self.centers = self.list_centers(step_size)[0:64]
+        self.centers = self.list_centers(step_size)[0:512]
 
     def __call__(self, filename, src_img=None):
         # Create and store the array
@@ -129,7 +129,50 @@ class CarveOutPipeline:
         print("Step 5: Migrating from GCS to S3")
         # self.migrate_result(filename)
 
+    def generate_mask(self, dst_img):
+        """
+        Generates a binary mask that indicates which voxels are contained in
+        the image carve-out.
+        """
+        def worker():
+            """
+            Writes an array of ones to the mask (i.e. dst_img).
+            """
+            while True:
+                # Get slice
+                slices = slices_q.get()
+                if slices is None:
+                    break
+
+                # Write patch
+                with write_lock:
+                    dst_img.write(mask_patch, slices)
+                pbar.update(1)
+
+        # Initializations
+        mask_patch = np.ones(self.radial_shape, dtype=np.uint16)
+        pbar = tqdm(total=len(self.centers), desc="   Mask")
+
+        # Slice queue
+        slices_q = queue.Queue(maxsize=self.prefetch)
+        for node in self.centers:
+            slices_q.put(self.node_to_slices(node))
+        for _ in range(self.num_workers):
+            slices_q.put(None)
+
+        # Write image
+        write_lock = Lock()
+        threads = [Thread(target=worker) for _ in range(self.num_workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
     def generate_raw(self, src_img, dst_img):
+        """
+        Generates an image carve out by copying image patches from "src_img"
+        to "dst_img" that are centered about the skeleton.
+        """
 
         def producer():
             for node in self.centers:
@@ -158,42 +201,6 @@ class CarveOutPipeline:
 
         # Start threads
         write_lock = threading.Lock()
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-    def generate_mask(self, dst_img):
-        """
-        Generates a binary mask that indicates which voxels are contained in
-        the image carve-out.
-        """
-        def worker():
-            while True:
-                # Get slice
-                slices = slices_q.get()
-                if slices is None:
-                    break
-
-                # Write patch
-                with write_lock:
-                    dst_img.write(mask_patch, slices)
-                pbar.update(1)
-
-        # Initializations
-        mask_patch = np.ones(self.radial_shape, dtype=np.uint16)
-        pbar = tqdm(total=len(self.centers), desc="   Mask")
-
-        # Slice queue
-        slices_q = queue.Queue(maxsize=self.prefetch)
-        for node in self.centers:
-            slices_q.put(self.node_to_slices(node))
-        for _ in range(self.num_workers):
-            slices_q.put(None)
-
-        # Write image
-        write_lock = Lock()
-        threads = [Thread(target=worker) for _ in range(self.num_workers)]
         for t in threads:
             t.start()
         for t in threads:
@@ -281,30 +288,6 @@ class CarveOutPipeline:
         )
         return is_contained
 
-    def migrate_result(self, name):
-        # Set paths
-        src_bucket, src_prefix = util.parse_cloud_path(output_gcs_dir)
-        src_path = os.path.join(src_prefix, name)
-
-        dst_bucket, dst_prefix = util.parse_cloud_path(output_s3_dir)
-        dst_path = os.path.join(dst_prefix, name)
-
-        # Migrate
-        asyncio.run(
-            util.migrate_omezarr_gcs_to_s3(
-                src_bucket,
-                src_path,
-                dst_bucket,
-                dst_path,
-            )
-        )
-
-    def node_to_slices(self, node, level=0):
-        voxel = [u // 2**level for u in self.graph.node_voxel(node)]
-        shape = [s // 2**level for s in self.radial_shape]
-        slices = img_util.get_center_slices(voxel, shape)
-        return slices
-
     def list_centers(self, step_size):
         """
         Generates nodes along skeletons used to create the image carve out.
@@ -340,6 +323,30 @@ class CarveOutPipeline:
                         visited.add(j)
             centers.append(i)
         return [c for c in centers if self.is_patch_contained(c)]
+
+    def migrate_result(self, name):
+        # Set paths
+        src_bucket, src_prefix = util.parse_cloud_path(output_gcs_dir)
+        src_path = os.path.join(src_prefix, name)
+
+        dst_bucket, dst_prefix = util.parse_cloud_path(output_s3_dir)
+        dst_path = os.path.join(dst_prefix, name)
+
+        # Migrate
+        asyncio.run(
+            util.migrate_omezarr_gcs_to_s3(
+                src_bucket,
+                src_path,
+                dst_bucket,
+                dst_path,
+            )
+        )
+
+    def node_to_slices(self, node, level=0):
+        voxel = [u // 2**level for u in self.graph.node_voxel(node)]
+        shape = [s // 2**level for s in self.radial_shape]
+        slices = img_util.get_center_slices(voxel, shape)
+        return slices
 
 
 def load_skeletons():
