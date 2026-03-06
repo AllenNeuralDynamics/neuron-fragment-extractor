@@ -99,7 +99,7 @@ class CarveOutPipeline:
 
         # Core data structures
         self.graph = graph
-        self.centers = self.list_centers(step_size)[0:512]
+        self.centers = self.list_centers(step_size)[0:32]
 
     def __call__(self, filename, src_img=None):
         # Create and store the array
@@ -117,7 +117,7 @@ class CarveOutPipeline:
 
         # Generate image pyramid
         print("Step 3: Generate Image Pyramid")
-        self.write_pyramid(root_path)
+        self.generate_pyramid(root_path)
         stop
 
         # Write metadata
@@ -154,12 +154,12 @@ class CarveOutPipeline:
         write_lock = Lock()
 
         # Start workers
+        slices_queue = queue.Queue(maxsize=self.prefetch)
         threads = [Thread(target=worker) for _ in range(self.num_workers)]
         for t in threads:
             t.start()
 
         # Populate queue
-        slices_queue = queue.Queue(maxsize=self.prefetch)
         for node in self.centers:
             slices_queue.put(self.node_to_slices(node))
         for _ in range(self.num_workers):
@@ -190,12 +190,12 @@ class CarveOutPipeline:
         write_lock = Lock()
 
         # Start workers
+        slices_queue = queue.Queue(maxsize=self.prefetch)
         threads = [Thread(target=worker) for _ in range(self.num_workers)]
         for t in threads:
             t.start()
 
         # Populate queue
-        slices_queue = queue.Queue(maxsize=self.prefetch)
         for node in self.centers:
             slices_queue.put(self.node_to_slices(node))
         for _ in range(self.num_workers):
@@ -205,7 +205,7 @@ class CarveOutPipeline:
         for t in threads:
             t.join()
 
-    def write_pyramid(self, root_path):
+    def generate_pyramid(self, root_path):
         """
         Generate OME-Zarr pyramid using TensorStore.
 
@@ -215,7 +215,7 @@ class CarveOutPipeline:
             Path to highest resolution image that downsampled versions are
             generated from.
         """
-        for level in tqdm(np.arange(1, num_levels), "   Downsample"):
+        for level in range(1, num_levels):
             # Set source image
             src_path = os.path.join(root_path, str(level - 1))
             src = TensorStoreImage(img_path=src_path)
@@ -226,18 +226,46 @@ class CarveOutPipeline:
             dst_shape = [s // 2**level for s in self.radial_shape]
 
             # Generate downsampled
-            for node in self.centers:
-                if self.is_patch_contained(node):
-                    # Read
-                    read_slices = self.node_to_slices(node, level=level-1)
-                    patch = src.read(read_slices)
+            self._create_pyramid_level(src, dst, dst_shape, level)
 
-                    # Downsample
-                    patch = img_util.resize(patch, dst_shape)
+    def _create_pyramid_level(self, src, dst, dst_shape, level):
+        def worker():
+            while True:
+                # Get slices
+                node = slices_queue.get()
+                if node is None:
+                    break
 
-                    # Write
-                    write_slices = self.node_to_slices(node, level=level)
+                # Read
+                read_slices = self.node_to_slices(node, level=level-1)
+                patch = src.read(read_slices)
+                patch = img_util.resize(patch, dst_shape)
+
+                # Write
+                write_slices = self.node_to_slices(node, level=level)
+                with write_lock:
                     dst.write(patch, write_slices)
+                pbar.update(1)
+
+        # Initializations
+        pbar = tqdm(total=len(self.centers), desc=f"   Level {level}")
+        write_lock = Lock()
+
+        # Start threads
+        slices_queue = queue.Queue(maxsize=self.prefetch)
+        threads = [Thread(target=worker) for _ in range(self.num_workers)]
+        for t in threads:
+            t.start()
+
+        # Populate queue
+        for node in self.centers:
+            slices_queue.put(node)
+        for _ in range(self.num_workers):
+            slices_queue.put(None)
+
+        # Wait until completion
+        for t in threads:
+            t.join()
 
     # --- Helpers ---
     def get_tensorstore_spec(self, root_path, level=0):
