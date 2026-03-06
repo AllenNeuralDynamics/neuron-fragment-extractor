@@ -30,15 +30,17 @@ from neuron_fragment_extractor.utils import img_util, util
 
 
 def main():
+    """
+    Execute the full image carve-out generation pipeline.
+    """
     # Initializations
     gt_graph = load_skeletons()
     src_img = TensorStoreImage(input_img_path)
-    img_shape = src_img.shape()
 
     # Generate carveouts
     pipeline = CarveOutPipeline(
         gt_graph,
-        img_shape,
+        src_img.shape(),
         radial_shape,
         num_levels=num_levels,
         step_size=step_size,
@@ -74,15 +76,24 @@ class CarveOutPipeline:
         ----------
         graph : SkeletonGraph
             Graph to be traversed to generate carve-out regions.
+        img_shape : Tuple[int]
+            Shape of image carve out.
         radial_shape : Tuple[int]
             Shape of region centered about skeleton to be carved out.
+        chunks : Tuple[int], optional
+            Chunk shape used to write OME-Zarr image. Default is (1, 1, 128
+            128, 128).
         num_workers : int, optional
-            Number of workers used to read and write image patches.
+            Number of workers used to read and write image patches. Default is
+            32.
         prefetch : int, optional
             Number of image patches to be prefeteched. Default is 128.
         step_size : float, optional
             Distance (in microns) between carved-out regions, measured along
             graph traversal. Default is 20.
+        voxel_size : Tuple[float], optional
+            Physical voxel size for the highest resolution level. Default is
+            (1.0, 0.748, 0.748).
         """
         # Check inputs
         assert len(img_shape) == 5, "Image shape must have format (T,C,Z,Y,X)"
@@ -164,20 +175,31 @@ class CarveOutPipeline:
         for t in threads:
             t.join()
 
-    def generate_raw(self, src_img, dst_img):
+    def generate_raw(self, src, dst):
         """
-        Generates an image carve out by copying image patches from "src_img"
-        to "dst_img" that are centered about the skeleton.
+        Generates an image carve-out by copying patches centered on the
+        skeleton from the source image to the destination image.
+
+        Parameters
+        ----------
+        src : TensorStoreImage
+            Image to be read from.
+        dst : TensorStoreImage
+            Image to be written to.
         """
         def worker():
+            """
+            Reads an array from the source image, then writes it to the
+            destination image.
+            """
             while True:
                 slices = slices_queue.get()
                 if slices is None:
                     break
 
-                patch = src_img.read(slices)
+                patch = src.read(slices)
                 with write_lock:
-                    dst_img.write(patch, slices)
+                    dst.write(patch, slices)
                 pbar.update(1)
 
         # Initializations
@@ -206,9 +228,8 @@ class CarveOutPipeline:
 
         Parameters
         ----------
-        img_path : str
-            Path to highest resolution image that downsampled versions are
-            generated from.
+        root_path : str
+            Path to root directory of the OME-Zarr image.
         """
         for level in range(1, num_levels):
             # Set source image
@@ -224,7 +245,27 @@ class CarveOutPipeline:
             self._create_pyramid_level(src, dst, dst_shape, level)
 
     def _create_pyramid_level(self, src, dst, dst_shape, level):
+        """
+        Generate a single level of the image pyramid by downsampling patches
+        from the previous level and writing them to the destination level.
+
+        Parameters
+        ----------
+        src : TensorStoreImage
+            Source image corresponding to pyramid level "level - 1" from
+            which patches are read.
+        dst : TensorStoreImage
+            Destination image corresponding to pyramid level "level" to
+            which resized patches are written.
+        dst_shape : Tuple[int]
+            Target shape of each patch written at this pyramid level.
+        level : int
+            Pyramid level being generated.
+        """
         def worker():
+            """
+            Writes downsampled patch to the destination image.
+            """
             while True:
                 # Get slices
                 node = slices_queue.get()
@@ -264,6 +305,22 @@ class CarveOutPipeline:
 
     # --- Helpers ---
     def get_tensorstore_spec(self, root_path, level=0):
+        """
+        Creates a TensorStore specification for creating an image at the
+        given path.
+
+        Parameters
+        ----------
+        root_path : str
+            Path to root directory of an OME-Zarr image.
+        level : int, optional
+            Image level to be written. Default is 0.
+
+        Returns
+        -------
+        spec : dict
+            TensorStore specification for creating the image.
+        """
         # Extract info
         bucket_name, prefix = util.parse_cloud_path(root_path)
         shape = (1, 1, *(s // 2**level for s in self.img_shape[2:]))
@@ -271,7 +328,7 @@ class CarveOutPipeline:
 
         # Create spec
         spec = {
-            "driver": "zarr2",
+            "driver": img_util.get_driver(root_path),
             "kvstore": {
                 "driver": img_util.get_storage_driver(root_path),
                 "bucket": bucket_name,
@@ -304,6 +361,22 @@ class CarveOutPipeline:
         return spec
 
     def is_patch_contained(self, node):
+        """
+        Checks whether the patch centered at a given node lies fully within
+        the spatial bounds of the image.
+
+        Parameters
+        ----------
+        node : int
+            Node ID whose associated voxel location is used as the center of
+            the patch.
+
+        Returns
+        -------
+        bool
+            True if the patch centered at the node is entirely contained
+            within the image bounds, otherwise False.
+        """
         voxel = self.graph.node_voxel(node)
         is_contained = img_util.is_patch_contained(
             voxel, self.radial_shape, self.img_shape[2:]
@@ -347,6 +420,14 @@ class CarveOutPipeline:
         return [c for c in centers if self.is_patch_contained(c)]
 
     def migrate_result(self, name):
+        """
+        Migrates the image carve out from GCS to S3.
+
+        Parameters
+        ----------
+        name : str
+            Name of the OME-Zarr image.
+        """
         # Set paths
         src_bucket, src_prefix = util.parse_cloud_path(output_gcs_dir)
         src_path = os.path.join(src_prefix, name)
@@ -365,6 +446,24 @@ class CarveOutPipeline:
         )
 
     def node_to_slices(self, node, level=0):
+        """
+        Converts a node to a set of array slices for extracting a patch
+        from a specific pyramid level of the image.
+
+        Parameters
+        ----------
+        node : int
+            Node ID whose voxel coordinate are used as the center of the
+            patch.
+        level : int, optional
+            Pyramid level for which slices are computed. Default is 0.
+
+        Returns
+        -------
+        List[slice]
+            Slice objects specifying the spatial region of the patch centered
+            at the node for the requested pyramid level.
+        """
         voxel = [u // 2**level for u in self.graph.node_voxel(node)]
         shape = [s // 2**level for s in self.radial_shape]
         slices = img_util.get_center_slices(voxel, shape)
@@ -413,7 +512,7 @@ if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
     is_single_tracing = True
-    is_test = True
+    is_test = False
 
     input_swc_names = (
         ["00005.swc"] if is_test else ["N002-802449-PP.swc"]
