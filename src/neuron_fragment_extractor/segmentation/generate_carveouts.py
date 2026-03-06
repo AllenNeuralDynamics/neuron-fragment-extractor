@@ -13,15 +13,12 @@ producing a sparse image containing only the neuron's signal.
 """
 
 from aind_data_transfer.transformations.ome_zarr import (
-    downsample_and_store,
-    write_ome_ngff_metadata
+    write_ome_ngff_metadata,
 )
 from google.cloud import storage
 from tqdm import tqdm
-from xarray_multiscale.reducers import windowed_max, windowed_mean
 
 import asyncio
-import dask.array as da
 import networkx as nx
 import numpy as np
 import os
@@ -45,7 +42,7 @@ def main():
         img_shape,
         radial_shape,
         num_levels=num_levels,
-        step_size=step_size
+        step_size=step_size,
     )
     pipeline("mask.zarr")
     pipeline("input.zarr", src_img=src_img)
@@ -64,8 +61,7 @@ class CarveOutPipeline:
         graph,
         img_shape,
         radial_shape,
-        block_shape=(1, 1, 256, 512, 512),
-        chunks=(1, 1, 64, 128, 128),
+        chunks=(1, 1, 128, 128, 128),
         num_levels=1,
         num_workers=32,
         prefetch=128,
@@ -92,8 +88,11 @@ class CarveOutPipeline:
         # Check inputs
         assert len(img_shape) == 5, "Image shape must have format (T,C,Z,Y,X)"
 
+        # Core data structures
+        self.graph = graph
+        self.centers = list(self.generate_centers(step_size))[0:64]
+
         # Instance attributes
-        self.block_shape = block_shape
         self.chunks = chunks
         self.graph = graph
         self.img_shape = img_shape
@@ -101,32 +100,17 @@ class CarveOutPipeline:
         self.num_workers = num_workers
         self.prefetch = prefetch
         self.radial_shape = radial_shape
-        self.step_size = step_size
         self.voxel_size = voxel_size
 
     def __call__(self, filename, src_img=None):
-        # Create zarr group
-        print("\nImage Name:", filename)
-        img_path = os.path.join(output_gcs_dir, filename)
-        bucket_name, prefix = util.parse_cloud_path(img_path)
-        root_group = img_util.create_zarr_group(bucket_name, img_path)
-        print("Image Path:", img_path)
-
         # Create and store the array
-        print(f"Step 1: Create OME-Zarr with shape {self.img_shape}")
-        root_group.create_dataset(
-            "0",
-            shape=self.img_shape,
-            chunks=self.chunks,
-            dimension_separator="/",
-            dtype="uint16",
-            fill_value=None,
-            overwrite=True
-        )
+        print(f"\nStep 1: Create OME-Zarr with shape={self.img_shape}")
+        img_path = os.path.join(output_gcs_dir, filename, str(0))
+        spec = self.get_tensorstore_spec(img_path)
+        dst_img = TensorStoreImage(img_path, spec)
 
         # Generate carve-out
         print("Step 2: Generate Image Carve-Out")
-        dst_img = TensorStoreImage(os.path.join(img_path, str(0)))
         if filename == "mask.zarr":
             self.generate_mask(dst_img)
         else:
@@ -134,36 +118,21 @@ class CarveOutPipeline:
 
         # Generate image pyramid
         print("Step 3: Generate Image Pyramid")
-        arr = da.from_zarr(root_group["0"])
-        reducer = windowed_max if filename == "mask.zarr" else windowed_mean
-        downsample_and_store(
-            arr=arr,
-            group=root_group,
-            n_lvls=self.num_levels,
-            scale_factors=(1, 1, 2, 2, 2),
-            block_shape=self.block_shape,
-            reducer=reducer
-        )
+        dst_img.write_pyramid(num_levels)
+        stop
 
         # Write metadata
         print("Step 4: Write MetaData")
-        write_ome_ngff_metadata(
-            group=root_group,
-            arr=arr,
-            image_name=filename,
-            n_lvls=self.num_levels,
-            scale_factors=(2, 2, 2),
-            voxel_size=self.voxel_size,
-        )
+        write_ome_ngff_metadata()
 
         # Migrate result
         print("Step 5: Migrating from GCS to S3")
-        #self.migrate_result(filename)
+        # self.migrate_result(filename)
 
     def generate_raw(self, src_img, dst_img):
 
         def producer():
-            for node in self.traverse_graph():
+            for node in self.centers:
                 if self.is_patch_contained(node):
                     slices_q.put(self.node_to_slices(node))
 
@@ -183,7 +152,7 @@ class CarveOutPipeline:
 
         # Initializations
         slices_q = queue.Queue(maxsize=self.prefetch)
-        pbar = tqdm(total=self.count_patches(), desc="Raw")
+        pbar = tqdm(total=len(self.centers), desc="   Raw")
         threads = [threading.Thread(target=producer)]
         for _ in range(self.num_workers):
             threads.append(threading.Thread(target=consumer))
@@ -200,8 +169,9 @@ class CarveOutPipeline:
         Generates a binary mask that indicates which voxels are contained in
         the image carve-out.
         """
+
         def producer():
-            for node in self.traverse_graph():
+            for node in self.centers:
                 if self.is_patch_contained(node):
                     slices_q.put(self.node_to_slices(node))
 
@@ -221,7 +191,7 @@ class CarveOutPipeline:
 
         # Initializations
         slices_q = queue.Queue(maxsize=self.prefetch)
-        pbar = tqdm(total=self.count_patches(), desc="Mask")
+        pbar = tqdm(total=len(self.centers), desc="   Mask")
         threads = [threading.Thread(target=producer)]
         for _ in range(self.num_workers):
             threads.append(threading.Thread(target=consumer))
@@ -234,12 +204,40 @@ class CarveOutPipeline:
             t.join()
 
     # --- Helpers ---
-    def count_patches(self):
-        cnt = 0
-        for node in self.traverse_graph():
-            if self.is_patch_contained(node):
-                cnt += 1
-        return cnt
+    def get_tensorstore_spec(self, img_path):
+        bucket_name, path = util.parse_cloud_path(img_path)
+        spec = {
+            "driver": "zarr2",
+            "kvstore": {
+                "driver": img_util.get_storage_driver(img_path),
+                "bucket": bucket_name,
+                "path": path,
+            },
+            "context": {
+                "cache_pool": {"total_bytes_limit": 1000000000},
+                "cache_pool#remote": {"total_bytes_limit": 1000000000},
+                "data_copy_concurrency": {"limit": 8},
+            },
+            "recheck_cached_metadata": False,
+            "recheck_cached_data": False,
+            "metadata": {
+                "shape": self.img_shape,
+                "zarr_format": 2,
+                "fill_value": 0,
+                "chunks": self.chunks,
+                "compressor": {
+                    "id": "blosc",
+                    "cname": "zstd",
+                    "clevel": 3,
+                    "shuffle": 1,
+                },
+                "dimension_separator": "/",
+                "dtype": "<u2",
+            },
+            "create": True,
+            "delete_existing": True,
+        }
+        return spec
 
     def is_patch_contained(self, node):
         voxel = self.graph.node_voxel(node)
@@ -268,33 +266,43 @@ class CarveOutPipeline:
 
     def node_to_slices(self, node):
         voxel = self.graph.node_voxel(node)
-        slices = img_util.get_slices(voxel, self.radial_shape)
-        return (0, 0, *slices)
+        return img_util.get_center_slices(voxel, self.radial_shape)
 
-    def traverse_graph(self):
+    def generate_centers(self, step_size):
+        """
+        Generates nodes along skeletons used to create the image carve out.
+
+        Parameters
+        ----------
+        step_size : float
+            Distance (in microns) between carved-out regions, measured along
+            graph traversal.
+
+        Returns
+        -------
+        Iterator[int]
+            Node IDs used to create image carve out.
+        """
         for nodes in map(list, nx.connected_components(self.graph)):
-            yield from self.traverse_connected_component(nodes[0])
+            root = nodes[0]
+            queue = [(root, np.inf)]
+            visited = set(queue)
+            while queue:
+                # Visit node
+                i, dist_i = queue.pop()
+                if dist_i >= step_size or self.graph.degree[i] == 1:
+                    yield i
+                    dist_i = 0
 
-    def traverse_connected_component(self, root):
-        queue = [(root, np.inf)]
-        visited = set(queue)
-        while queue:
-            # Visit node
-            i, dist_i = queue.pop()
-            if dist_i >= self.step_size or self.graph.degree[i] == 1:
-                yield i
-                dist_i = 0
-
-            # Update queue
-            for j in self.graph.neighbors(i):
-                if j not in visited:
-                    dist_j = dist_i + self.graph.dist(i, j)
-                    queue.append((j, dist_j))
-                    visited.add(j)
-        yield i
+                # Update queue
+                for j in self.graph.neighbors(i):
+                    if j not in visited:
+                        dist_j = dist_i + self.graph.dist(i, j)
+                        queue.append((j, dist_j))
+                        visited.add(j)
+            yield i
 
 
-# --- Helpers ---
 def load_skeletons():
     """
     Loads the SWC files into a SkeletonGraph.
@@ -331,12 +339,14 @@ if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
     is_single_tracing = True
-    is_test = False
+    is_test = True
 
-    input_swc_names = ["00005.swc", "00013.swc"] if is_test else ["N002-802449-PP.swc"]
+    input_swc_names = (
+        ["00005.swc"] if is_test else ["N002-802449-PP.swc"]
+    )
     num_levels = 3 if is_test else 7
     radial_shape = (32, 32, 32) if is_test else (512, 512, 512)
-    step_size = 10 if is_test else 128
+    step_size = 16 if is_test else 128
 
     # Check whether to add neuron ID to output dir
     if is_single_tracing and not is_test:

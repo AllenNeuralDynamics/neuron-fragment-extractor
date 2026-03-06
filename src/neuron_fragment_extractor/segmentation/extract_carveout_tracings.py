@@ -25,7 +25,7 @@ def main():
     for graph in tqdm(load_skeletons(), desc="Extract Skeletons"):
         remove_excluded_nodes(graph)
         remove_small_components(graph)
-        graph.to_swcs(output_dir)
+        graph.to_swcs(output_dir, use_color=False)
 
 
 def load_skeletons():
@@ -44,7 +44,7 @@ def load_skeletons():
 
 
 def remove_excluded_nodes(graph):
-    nodes = graph.get_nodes_with_label(0)
+    nodes = graph.nodes_with_label(0)
     graph.remove_nodes_from(nodes)
 
 
