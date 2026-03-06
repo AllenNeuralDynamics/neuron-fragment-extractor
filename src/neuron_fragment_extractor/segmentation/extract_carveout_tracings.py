@@ -10,31 +10,41 @@ image carve-outs
 """
 
 from segmentation_skeleton_metrics.data_handling.graph_loading import (
-    DataLoader,
-    LabelHandler
+    GraphLoader,
+    LabelHandler,
 )
-from segmentation_skeleton_metrics.utils.img_util import TensorStoreReader
+from segmentation_skeleton_metrics.utils.img_util import TensorStoreImage
+from segmentation_skeleton_metrics.utils import util
+from tqdm import tqdm
 
 import networkx as nx
 
 
 def main():
-    for graph in load_skeletons():
+    util.mkdir(output_dir)
+    for graph in tqdm(load_skeletons(), desc="Extract Skeletons"):
         remove_excluded_nodes(graph)
         remove_small_components(graph)
-        graph.write_swcs(output_dir)
+        graph.to_swcs(output_dir, use_color=False)
 
 
 def load_skeletons():
     label_handler = LabelHandler()
-    mask = TensorStoreReader(mask_path)
-    dataloader = DataLoader(label_handler)
-    graphs = dataloader.load_groundtruth(gt_swcs_path, mask)
+    mask = TensorStoreImage(mask_path)
+    graph_loader = GraphLoader(
+        anisotropy=(0.748, 0.748, 1.0),
+        fix_label_misalignments=False,
+        is_groundtruth=True,
+        label_handler=label_handler,
+        label_mask=mask,
+        use_anisotropy=True,
+    )
+    graphs = graph_loader(gt_swcs_path)
     return graphs.values()
 
 
 def remove_excluded_nodes(graph):
-    nodes = graph.get_nodes_with_label(0)
+    nodes = graph.nodes_with_label(0)
     graph.remove_nodes_from(nodes)
 
 
@@ -49,17 +59,11 @@ def remove_small_components(graph):
 if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
-    is_test = True
 
     # Paths
-    if is_test:
-        gt_swcs_path = "gs://allen-nd-goog/from_aind/training-data_2025-07-30/swcs/block_000/"
-        mask_path = "s3://aind-msma-morphology-data/anna.grim/image-carveouts/754612/blocks/block_000/mask.zarr/0"
-        output_dir = "/home/jupyter/results/carveout_skeletons/test"
-    else:
-        gt_swcs_path = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel"
-        mask_path = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain/mask.zarr/0"
-        output_dir = "/home/jupyter/results/carveout_skeletons/test"
+    gt_swcs_path = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/world"
+    mask_path = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain-N002/mask.zarr/0"
+    output_dir = "/home/jupyter/results/carveout_skeletons/test"
 
     # Run code
     main()

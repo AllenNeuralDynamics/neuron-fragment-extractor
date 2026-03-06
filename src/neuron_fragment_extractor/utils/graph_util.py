@@ -70,7 +70,7 @@ class GraphLoader:
         swc_dicts = self.swc_reader(swc_pointer)
 
         # Load graphs
-        multiprocessing.set_start_method('spawn', force=True)
+        multiprocessing.set_start_method("spawn", force=True)
         with ProcessPoolExecutor() as executor:
             # Start processes
             pending = set()
@@ -114,7 +114,7 @@ class GraphLoader:
         # Extract irreducibes
         leaf = find_leaf(graph)
         irreducibles = self.get_irreducibles(graph, leaf)
-        irreducibles["swc_name"] = graph.graph['swc_name']
+        irreducibles["swc_name"] = graph.graph["swc_name"]
         return irreducibles
 
     def get_irreducibles(self, graph, source):
@@ -161,7 +161,7 @@ class GraphLoader:
 
         # Main
         root = None
-        for (i, j) in nx.dfs_edges(graph, source=source):
+        for i, j in nx.dfs_edges(graph, source=source):
             # Check for start of irreducible edge
             if root is None:
                 root, edge_length = i, 0
@@ -235,7 +235,8 @@ def set_node_attrs(graph, nodes):
     attrs = dict()
     for i in nodes:
         attrs[i] = {
-            "radius": graph.graph["radius"][i], "xyz": graph.graph["xyz"][i]
+            "radius": graph.graph["radius"][i],
+            "xyz": graph.graph["xyz"][i],
         }
     return attrs
 
@@ -416,7 +417,7 @@ def prune_branches(graph, depth):
     for leaf in get_leafs(graph):
         branch = [leaf]
         length = 0
-        for (i, j) in nx.dfs_edges(graph, source=leaf):
+        for i, j in nx.dfs_edges(graph, source=leaf):
             # Visit edge
             length += dist(graph, i, j)
             if length > depth:

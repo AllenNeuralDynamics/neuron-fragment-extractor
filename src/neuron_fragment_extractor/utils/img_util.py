@@ -8,12 +8,11 @@ Code for working with images.
 
 """
 
-import gcsfs
+from scipy.ndimage import zoom
+
 import matplotlib.pyplot as plt
 import numpy as np
-import s3fs
 import tensorstore as ts
-import zarr
 
 from neuron_fragment_extractor.utils import util
 
@@ -24,7 +23,7 @@ class TensorStoreImage:
     Class that reads an image with TensorStore library.
     """
 
-    def __init__(self, img_path):
+    def __init__(self, img_path=None, spec=None):
         """
         Instantiates a TensorStoreReader object.
 
@@ -33,31 +32,11 @@ class TensorStoreImage:
         img_path : str
             Path to image.
         """
-        self.path = img_path
-        self._load_image()
+        assert img_path or spec
+        self.spec = spec or self.create_spec(img_path)
+        self.img = ts.open(self.spec).result()
 
-    def _load_image(self):
-        """
-        Loads image using the TensorStore library.
-        """
-        bucket_name, path = util.parse_cloud_path(self.path)
-        self.img = ts.open(
-            {
-                "driver": get_driver(self.path),
-                "kvstore": {
-                    "driver": get_storage_driver(self.path),
-                    "bucket": bucket_name,
-                    "path": path,
-                },
-                "context": {
-                    "cache_pool": {"total_bytes_limit": 1000000000},
-                    "cache_pool#remote": {"total_bytes_limit": 1000000000},
-                    "data_copy_concurrency": {"limit": 8},
-                },
-                "recheck_cached_data": "open",
-            }
-        ).result()
-
+    # --- Core Routines ---
     def read(self, slices):
         """
         Reads the patch specified by the given image slices.
@@ -98,6 +77,24 @@ class TensorStoreImage:
         """
         self.img[slices] = patch
 
+    # --- Helpers ---
+    def create_spec(self, img_path):
+        bucket_name, relative_path = util.parse_cloud_path(img_path)
+        spec = {
+            "driver": get_driver(img_path),
+            "kvstore": {
+                "driver": get_storage_driver(img_path),
+                "bucket": bucket_name,
+                "path": relative_path,
+            },
+            "context": {
+                "cache_pool": {"total_bytes_limit": 1000000000},
+                "cache_pool#remote": {"total_bytes_limit": 1000000000},
+                "data_copy_concurrency": {"limit": 8},
+            },
+        }
+        return spec
+
     def shape(self):
         """
         Gets the shape of image.
@@ -110,19 +107,75 @@ class TensorStoreImage:
         return self.img.shape
 
 
-def create_zarr_group(bucket_name, path):
-    if util.is_gcs_path(path):
-        gcs = gcsfs.GCSFileSystem(project=bucket_name)
-        store = gcsfs.GCSMap(root=path, gcs=gcs, check=False, create=True)
-    elif util.is_s3_path(path):
-        s3 = s3fs.S3FileSystem(anon=False)
-        store = s3fs.S3Map(root=path, s3=s3, check=False)
-    else:
-        raise Exception("Invalid path!")
-    return zarr.open_group(store=store)
+# --- OME-Zarr Metadata ---
+def create_zattrs(num_levels, voxel_size=(1.0, 0.748, 0.748)):
+    multiscales = [{
+        "axes": get_axes(),
+        "datasets": get_datasets(num_levels, voxel_size),
+        "name": "/",
+        "version": "0.4",
+    }]
+    return {"multiscales": multiscales}
+
+
+def get_axes():
+    axes = [
+        {"name": "t", "type": "time", "unit": "millisecond"},
+        {"name": "c", "type": "channel"},
+        {"name": "z", "type": "space", "unit": "micrometer"},
+        {"name": "y", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"}
+    ]
+    return axes
+
+
+def get_datasets(num_levels, voxel_size):
+    datasets = list()
+    vz, vy, vx = voxel_size
+    base_scale = [1.0, 1.0, float(vz), float(vy), float(vx)]
+    for level in range(num_levels):
+        # Downsample only spatial dims
+        scale_level = [
+            1.0,  # t
+            1.0,  # c
+            base_scale[2] * (2 ** level),  # z
+            base_scale[3] * (2 ** level),  # y
+            base_scale[4] * (2 ** level),  # x
+        ]
+        dataset_level = {
+            "coordinateTransformations": [
+                {
+                    "scale": scale_level,
+                    "type": "scale",
+                },
+            ],
+            "path": str(level),
+        }
+        datasets.append(dataset_level)
+    return datasets
 
 
 # --- Miscellaneous ---
+def resize(img, new_shape):
+    """
+    Resizes a 3D image to the specified new shape using linear interpolation.
+
+    Parameters
+    ----------
+    img : numpy.ndarray
+        Input 3D image array with shape (depth, height, width).
+    new_shape : Tuple[int]
+        Desired output shape as (new_depth, new_height, new_width).
+
+    Returns
+    -------
+    numpy.ndarray
+        Resized 3D image with shape equal to "new_shape".
+    """
+    zoom_factors = np.array(new_shape) / np.array(img.shape)
+    return zoom(img, zoom_factors, order=1, prefilter=False)
+
+
 def find_img_path(bucket_name, root_dir, brain_id):
     """
     Finds the path to a whole-brain dataset stored in a GCS bucket.
@@ -171,7 +224,7 @@ def get_driver(img_path):
         raise ValueError(f"Unsupported image format: {img_path}")
 
 
-def get_slices(center, shape):
+def get_center_slices(center, shape):
     """
     Gets the start and end indices of the chunk to be read.
 
@@ -188,7 +241,28 @@ def get_slices(center, shape):
         Slice objects used to index into the image.
     """
     start = [int(c - d // 2) for c, d in zip(center, shape)]
-    return tuple(slice(s, s + d) for s, d in zip(start, shape))
+    slices = tuple(slice(s, s + d) for s, d in zip(start, shape))
+    return (0, 0, *slices)
+
+
+def get_slices(voxel, shape):
+    """
+    Gets the start and end indices of the chunk to be read.
+
+    Parameters
+    ----------
+    voxel : Tuple[int]
+        Start voxel of the slices.
+    shape : Tuple[int]
+        Shape of image patch to be read.
+
+    Return
+    ------
+    Tuple[slice]
+        Slice objects used to index into the image.
+    """
+    slices = tuple(slice(v, v + d) for v, d in zip(voxel, shape))
+    return (0, 0, *slices)
 
 
 def get_storage_driver(img_path):
