@@ -98,7 +98,7 @@ class CarveOutPipeline:
 
         # Core data structures
         self.graph = graph
-        self.centers = self.list_centers(step_size)[0:16]
+        self.centers = self.list_centers(step_size)
 
     def __call__(self, filename, src_img=None):
         # Create and store the array
