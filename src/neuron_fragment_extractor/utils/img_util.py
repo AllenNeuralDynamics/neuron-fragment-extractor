@@ -8,9 +8,7 @@ Code for working with images.
 
 """
 
-from copy import deepcopy
 from scipy.ndimage import zoom
-from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,7 +23,7 @@ class TensorStoreImage:
     Class that reads an image with TensorStore library.
     """
 
-    def __init__(self, img_path, spec=None):
+    def __init__(self, img_path=None, spec=None):
         """
         Instantiates a TensorStoreReader object.
 
@@ -34,8 +32,8 @@ class TensorStoreImage:
         img_path : str
             Path to image.
         """
-        self.img_path = img_path
-        self.spec = spec or self.create_spec()
+        assert img_path or spec
+        self.spec = spec or self.create_spec(img_path)
         self.img = ts.open(self.spec).result()
 
     # --- Core Routines ---
@@ -79,58 +77,15 @@ class TensorStoreImage:
         """
         self.img[slices] = patch
 
-    def write_pyramid(self, num_levels):
-        """
-        Generate OME-Zarr pyramid using TensorStore.
-
-        Parameters
-        ----------
-        num_levels : int
-            Number of pyramid levels.
-        """
-        bucket_name, path = util.parse_cloud_path(self.img_path)
-        src = TensorStoreImage(self.img_path)
-        assert path.endswith("/0")
-        for level in tqdm(np.arange(1, num_levels), "   Downsample"):
-            # Level info
-            dst_shape = (1, 1, *(s // 2 for s in src.shape()[2:]))
-            dst_path = path[:-1] + str(level)
-
-            src_chunk = src.img.chunk_layout.read_chunk.shape
-            dst_chunk = (1, 1, *(s // 2 for s in src_chunk[2:]))
-
-            # Set spec for downsampled
-            spec_lvl = deepcopy(self.spec)
-            spec_lvl["kvstore"]["path"] = dst_path
-            spec_lvl["metadata"]["shape"] = dst_shape
-            spec_lvl["metadata"]["chunks"] = dst_chunk
-
-            # Generate downsampled
-            dst = TensorStoreImage(dst_path, spec=spec_lvl)
-            for x in range(0, src.shape()[2], src_chunk[2]):
-                for y in range(0, src.shape()[3], src_chunk[3]):
-                    for z in range(0, src.shape()[4], src_chunk[4]):
-
-                        read_slices = get_slices((x, y, z), src_chunk[2:])
-                        block = src.read(read_slices)
-
-                        down = resize(block, dst_chunk[2:])
-                        voxel = (x // 2, y // 2, z // 2)
-
-                        write_slices = get_slices(voxel, down.shape)
-                        dst.write(down, write_slices)
-
-            src = dst
-
     # --- Helpers ---
-    def create_spec(self):
-        bucket_name, path = util.parse_cloud_path(self.img_path)
+    def create_spec(self, img_path):
+        bucket_name, relative_path = util.parse_cloud_path(img_path)
         spec = {
-            "driver": get_driver(self.img_path),
+            "driver": get_driver(img_path),
             "kvstore": {
-                "driver": get_storage_driver(self.img_path),
+                "driver": get_storage_driver(img_path),
                 "bucket": bucket_name,
-                "path": path,
+                "path": relative_path,
             },
             "context": {
                 "cache_pool": {"total_bytes_limit": 1000000000},

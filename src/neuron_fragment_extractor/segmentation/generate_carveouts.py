@@ -16,6 +16,7 @@ from aind_data_transfer.transformations.ome_zarr import (
     write_ome_ngff_metadata,
 )
 from google.cloud import storage
+from threading import Lock, Thread
 from tqdm import tqdm
 
 import asyncio
@@ -88,13 +89,8 @@ class CarveOutPipeline:
         # Check inputs
         assert len(img_shape) == 5, "Image shape must have format (T,C,Z,Y,X)"
 
-        # Core data structures
-        self.graph = graph
-        self.centers = list(self.generate_centers(step_size))[0:64]
-
         # Instance attributes
         self.chunks = chunks
-        self.graph = graph
         self.img_shape = img_shape
         self.num_levels = num_levels
         self.num_workers = num_workers
@@ -102,12 +98,16 @@ class CarveOutPipeline:
         self.radial_shape = radial_shape
         self.voxel_size = voxel_size
 
+        # Core data structures
+        self.graph = graph
+        self.centers = self.list_centers(step_size)[0:64]
+
     def __call__(self, filename, src_img=None):
         # Create and store the array
         print(f"\nStep 1: Create OME-Zarr with shape={self.img_shape}")
-        img_path = os.path.join(output_gcs_dir, filename, str(0))
-        spec = self.get_tensorstore_spec(img_path)
-        dst_img = TensorStoreImage(img_path, spec)
+        root_path = os.path.join(output_gcs_dir, filename)
+        spec = self.get_tensorstore_spec(root_path, level=0)
+        dst_img = TensorStoreImage(spec=spec)
 
         # Generate carve-out
         print("Step 2: Generate Image Carve-Out")
@@ -118,7 +118,7 @@ class CarveOutPipeline:
 
         # Generate image pyramid
         print("Step 3: Generate Image Pyramid")
-        dst_img.write_pyramid(num_levels)
+        self.write_pyramid(root_path)
         stop
 
         # Write metadata
@@ -133,8 +133,7 @@ class CarveOutPipeline:
 
         def producer():
             for node in self.centers:
-                if self.is_patch_contained(node):
-                    slices_q.put(self.node_to_slices(node))
+                slices_q.put(self.node_to_slices(node))
 
             for _ in range(self.num_workers):
                 slices_q.put(None)
@@ -169,49 +168,85 @@ class CarveOutPipeline:
         Generates a binary mask that indicates which voxels are contained in
         the image carve-out.
         """
-
-        def producer():
-            for node in self.centers:
-                if self.is_patch_contained(node):
-                    slices_q.put(self.node_to_slices(node))
-
-            for _ in range(self.num_workers):
-                slices_q.put(None)
-
-        def consumer():
-            mask_patch = np.ones(self.radial_shape, dtype=np.uint16)
+        def worker():
             while True:
+                # Get slice
                 slices = slices_q.get()
                 if slices is None:
                     break
 
+                # Write patch
                 with write_lock:
                     dst_img.write(mask_patch, slices)
                 pbar.update(1)
 
         # Initializations
-        slices_q = queue.Queue(maxsize=self.prefetch)
+        mask_patch = np.ones(self.radial_shape, dtype=np.uint16)
         pbar = tqdm(total=len(self.centers), desc="   Mask")
-        threads = [threading.Thread(target=producer)]
-        for _ in range(self.num_workers):
-            threads.append(threading.Thread(target=consumer))
 
-        # Start threads
-        write_lock = threading.Lock()
+        # Slice queue
+        slices_q = queue.Queue(maxsize=self.prefetch)
+        for node in self.centers:
+            slices_q.put(self.node_to_slices(node))
+        for _ in range(self.num_workers):
+            slices_q.put(None)
+
+        # Write image
+        write_lock = Lock()
+        threads = [Thread(target=worker) for _ in range(self.num_workers)]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
 
+    def write_pyramid(self, root_path):
+        """
+        Generate OME-Zarr pyramid using TensorStore.
+
+        Parameters
+        ----------
+        img_path : str
+            Path to highest resolution image that downsampled versions are
+            generated from.
+        """
+        for level in tqdm(np.arange(1, num_levels), "   Downsample"):
+            # Set source image
+            src_path = os.path.join(root_path, str(level - 1))
+            src = TensorStoreImage(img_path=src_path)
+
+            # Set dst image
+            dst_spec = self.get_tensorstore_spec(root_path, level=level)
+            dst = TensorStoreImage(spec=dst_spec)
+            dst_shape = [s // 2**level for s in self.radial_shape]
+
+            # Generate downsampled
+            for node in self.centers:
+                if self.is_patch_contained(node):
+                    # Read
+                    read_slices = self.node_to_slices(node, level=level-1)
+                    patch = src.read(read_slices)
+
+                    # Downsample
+                    patch = img_util.resize(patch, dst_shape)
+
+                    # Write
+                    write_slices = self.node_to_slices(node, level=level)
+                    dst.write(patch, write_slices)
+
     # --- Helpers ---
-    def get_tensorstore_spec(self, img_path):
-        bucket_name, path = util.parse_cloud_path(img_path)
+    def get_tensorstore_spec(self, root_path, level=0):
+        # Extract info
+        bucket_name, prefix = util.parse_cloud_path(root_path)
+        shape = (1, 1, *(s // 2**level for s in self.img_shape[2:]))
+        chunks = (1, 1, *(s // 2**level for s in self.chunks[2:]))
+
+        # Create spec
         spec = {
             "driver": "zarr2",
             "kvstore": {
-                "driver": img_util.get_storage_driver(img_path),
+                "driver": img_util.get_storage_driver(root_path),
                 "bucket": bucket_name,
-                "path": path,
+                "path": os.path.join(prefix, str(level)),
             },
             "context": {
                 "cache_pool": {"total_bytes_limit": 1000000000},
@@ -221,10 +256,10 @@ class CarveOutPipeline:
             "recheck_cached_metadata": False,
             "recheck_cached_data": False,
             "metadata": {
-                "shape": self.img_shape,
+                "shape": shape,
                 "zarr_format": 2,
                 "fill_value": 0,
-                "chunks": self.chunks,
+                "chunks": chunks,
                 "compressor": {
                     "id": "blosc",
                     "cname": "zstd",
@@ -264,11 +299,13 @@ class CarveOutPipeline:
             )
         )
 
-    def node_to_slices(self, node):
-        voxel = self.graph.node_voxel(node)
-        return img_util.get_center_slices(voxel, self.radial_shape)
+    def node_to_slices(self, node, level=0):
+        voxel = [u // 2**level for u in self.graph.node_voxel(node)]
+        shape = [s // 2**level for s in self.radial_shape]
+        slices = img_util.get_center_slices(voxel, shape)
+        return slices
 
-    def generate_centers(self, step_size):
+    def list_centers(self, step_size):
         """
         Generates nodes along skeletons used to create the image carve out.
 
@@ -283,6 +320,7 @@ class CarveOutPipeline:
         Iterator[int]
             Node IDs used to create image carve out.
         """
+        centers = list()
         for nodes in map(list, nx.connected_components(self.graph)):
             root = nodes[0]
             queue = [(root, np.inf)]
@@ -291,7 +329,7 @@ class CarveOutPipeline:
                 # Visit node
                 i, dist_i = queue.pop()
                 if dist_i >= step_size or self.graph.degree[i] == 1:
-                    yield i
+                    centers.append(i)
                     dist_i = 0
 
                 # Update queue
@@ -300,7 +338,8 @@ class CarveOutPipeline:
                         dist_j = dist_i + self.graph.dist(i, j)
                         queue.append((j, dist_j))
                         visited.add(j)
-            yield i
+            centers.append(i)
+        return [c for c in centers if self.is_patch_contained(c)]
 
 
 def load_skeletons():
