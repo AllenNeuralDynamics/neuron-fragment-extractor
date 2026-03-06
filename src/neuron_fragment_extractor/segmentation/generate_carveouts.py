@@ -475,7 +475,7 @@ def load_skeletons(swc_dir, swc_names):
 
 
 # --- Main Routine ---
-def main(
+def run(
     input_img_path,
     input_swc_dir,
     input_swc_names,
@@ -547,7 +547,7 @@ if __name__ == "__main__":
         output_s3_dir = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain{neuron_id}/"
 
     # Run code
-    main(
+    run(
         input_img_path,
         input_swc_dir,
         input_swc_names,
