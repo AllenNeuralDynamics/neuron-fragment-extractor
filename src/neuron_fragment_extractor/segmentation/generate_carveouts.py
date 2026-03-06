@@ -12,14 +12,13 @@ producing a sparse image containing only the neuron's signal.
 
 """
 
-from aind_data_transfer.transformations.ome_zarr import (
-    write_ome_ngff_metadata,
-)
 from google.cloud import storage
 from threading import Lock, Thread
 from tqdm import tqdm
 
 import asyncio
+import gcsfs
+import json
 import networkx as nx
 import numpy as np
 import os
@@ -99,7 +98,7 @@ class CarveOutPipeline:
 
         # Core data structures
         self.graph = graph
-        self.centers = self.list_centers(step_size)[0:512]
+        self.centers = self.list_centers(step_size)[0:16]
 
     def __call__(self, filename, src_img=None):
         # Create and store the array
@@ -107,6 +106,7 @@ class CarveOutPipeline:
         root_path = os.path.join(output_gcs_dir, filename)
         spec = self.get_tensorstore_spec(root_path, level=0)
         dst_img = TensorStoreImage(spec=spec)
+        self.write_zattrs(root_path)
 
         # Generate carve-out
         print("Step 2: Generate Image Carve-Out")
@@ -119,12 +119,8 @@ class CarveOutPipeline:
         print("Step 3: Generate Image Pyramid")
         self.generate_pyramid(root_path)
 
-        # Write metadata
-        print("Step 4: Write MetaData")
-        #write_ome_ngff_metadata()
-
         # Migrate result
-        print("Step 5: Migrating from GCS to S3")
+        print("Step 4: Migrating from GCS to S3")
         # self.migrate_result(filename)
 
     def generate_mask(self, dst_img):
@@ -238,7 +234,7 @@ class CarveOutPipeline:
                 # Read
                 read_slices = self.node_to_slices(node, level=level-1)
                 patch = src.read(read_slices)
-                patch = img_util.resize(patch, dst_shape)
+                patch = img_util.resize(patch, dst_shape).astype(np.uint16)
 
                 # Write
                 write_slices = self.node_to_slices(node, level=level)
@@ -373,6 +369,12 @@ class CarveOutPipeline:
         shape = [s // 2**level for s in self.radial_shape]
         slices = img_util.get_center_slices(voxel, shape)
         return slices
+
+    def write_zattrs(self, root_path):
+        fs = gcsfs.GCSFileSystem(project="allen-nd-goog")
+        with fs.open(f"{root_path}/.zattrs", "w") as f:
+            zattrs = img_util.create_zattrs(self.num_levels)
+            f.write(json.dumps(zattrs, indent=4))
 
 
 def load_skeletons():

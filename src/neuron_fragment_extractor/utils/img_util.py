@@ -107,10 +107,58 @@ class TensorStoreImage:
         return self.img.shape
 
 
+# --- OME-Zarr Metadata ---
+def create_zattrs(num_levels, voxel_size=(1.0, 0.748, 0.748)):
+    multiscales = [{
+        "axes": get_axes(),
+        "datasets": get_datasets(num_levels, voxel_size),
+        "name": "/",
+        "version": "0.4",
+    }]
+    return {"multiscales": multiscales}
+
+
+def get_axes():
+    axes = [
+        {"name": "t", "type": "time", "unit": "millisecond"},
+        {"name": "c", "type": "channel"},
+        {"name": "z", "type": "space", "unit": "micrometer"},
+        {"name": "y", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"}
+    ]
+    return axes
+
+
+def get_datasets(num_levels, voxel_size):
+    datasets = list()
+    vz, vy, vx = voxel_size
+    base_scale = [1.0, 1.0, float(vz), float(vy), float(vx)]
+    for level in range(num_levels):
+        # Downsample only spatial dims
+        scale_level = [
+            1.0,  # t
+            1.0,  # c
+            base_scale[2] * (2 ** level),  # z
+            base_scale[3] * (2 ** level),  # y
+            base_scale[4] * (2 ** level),  # x
+        ]
+        dataset_level = {
+            "coordinateTransformations": [
+                {
+                    "scale": scale_level,
+                    "type": "scale",
+                },
+            ],
+            "path": str(level),
+        }
+        datasets.append(dataset_level)
+    return datasets
+
+
 # --- Miscellaneous ---
 def resize(img, new_shape):
     """
-    Resize a 3D image to the specified new shape using linear interpolation.
+    Resizes a 3D image to the specified new shape using linear interpolation.
 
     Parameters
     ----------
@@ -125,7 +173,7 @@ def resize(img, new_shape):
         Resized 3D image with shape equal to "new_shape".
     """
     zoom_factors = np.array(new_shape) / np.array(img.shape)
-    return zoom(img, zoom_factors, order=0, prefilter=False)
+    return zoom(img, zoom_factors, order=1, prefilter=False)
 
 
 def find_img_path(bucket_name, root_dir, brain_id):
