@@ -42,6 +42,7 @@ def main():
         gt_graph,
         src_img.shape(),
         radial_shape,
+        chunks=chunks,
         num_levels=num_levels,
         step_size=step_size,
     )
@@ -66,7 +67,7 @@ class CarveOutPipeline:
         graph,
         img_shape,
         radial_shape,
-        chunks=(1, 1, 128, 128, 128),
+        chunks=(1, 1, 128, 256, 256),
         num_levels=1,
         num_workers=32,
         prefetch=128,
@@ -113,7 +114,7 @@ class CarveOutPipeline:
 
         # Core data structures
         self.graph = graph
-        self.centers = self.list_centers(step_size)
+        self.centers = self.list_centers(step_size)[0:64]
 
     def __call__(self, filename, src_img=None):
         """
@@ -344,7 +345,7 @@ class CarveOutPipeline:
         # Extract info
         bucket_name, prefix = util.parse_cloud_path(root_path)
         shape = (1, 1, *(s // 2**level for s in self.img_shape[2:]))
-        chunks = (1, 1, *(s // 2**level for s in self.chunks[2:]))
+        chunks = (1, 1, *(max(s // 2**level, 32) for s in self.chunks[2:]))
 
         # Create spec
         spec = {
@@ -553,14 +554,15 @@ if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
     is_single_tracing = True
-    is_test = False
+    is_test = True
 
     input_swc_names = (
         ["00005.swc"] if is_test else ["N002-802449-PP.swc"]
     )
+    chunks = (1, 1, 256, 256, 256) if is_test else (1, 1, 512, 512, 512)
     num_levels = 3 if is_test else 7
     radial_shape = (32, 32, 32) if is_test else (512, 512, 512)
-    step_size = 16 if is_test else 256
+    step_size = 4 if is_test else 64
 
     # Check whether to add neuron ID to output dir
     if is_single_tracing and not is_test:

@@ -21,7 +21,6 @@ dependencies = [
     "fastremap",
     "gcsfs",
     "google-cloud-storage",
-    "kerchunk",
     "matplotlib",
     "networkx",
     "scipy",
