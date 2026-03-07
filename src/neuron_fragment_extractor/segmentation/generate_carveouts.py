@@ -224,7 +224,7 @@ class CarveOutPipeline:
 
     def generate_pyramid(self, root_path):
         """
-        Generate OME-Zarr pyramid using TensorStore.
+        Generates OME-Zarr pyramid using TensorStore.
 
         Parameters
         ----------
@@ -246,7 +246,7 @@ class CarveOutPipeline:
 
     def _create_pyramid_level(self, src, dst, dst_shape, level):
         """
-        Generate a single level of the image pyramid by downsampling patches
+        Generates a single level of the image pyramid by downsampling patches
         from the previous level and writing them to the destination level.
 
         Parameters
@@ -488,7 +488,7 @@ def run(
     radial_shape=(512, 512, 512),
 ):
     """
-    Execute the full image carve-out generation pipeline.
+    Executes the full image carve-out generation pipeline.
     """
     # Load data
     graph = load_skeletons(input_swc_dir, input_swc_names)

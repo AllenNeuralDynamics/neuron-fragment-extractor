@@ -21,6 +21,9 @@ import networkx as nx
 
 
 def main():
+    """
+    Runs the neuron fragment extraction pipeline.
+    """
     util.mkdir(output_dir)
     for graph in tqdm(load_skeletons(), desc="Extract Skeletons"):
         remove_excluded_nodes(graph)
@@ -29,6 +32,14 @@ def main():
 
 
 def load_skeletons():
+    """
+    Loads skeletons as a labeled graph.
+
+    Parameters
+    ----------
+    List[LabeledGraph]
+        Labeled graphs loaded from GCS bucket.
+    """
     label_handler = LabelHandler()
     mask = TensorStoreImage(mask_path)
     graph_loader = GraphLoader(
@@ -44,11 +55,27 @@ def load_skeletons():
 
 
 def remove_excluded_nodes(graph):
+    """
+    Removes nodes with the label zero from the given graph.
+
+    Parameters
+    ----------
+    graph : LabeledGraph
+        Graph to be updated.
+    """
     nodes = graph.nodes_with_label(0)
     graph.remove_nodes_from(nodes)
 
 
 def remove_small_components(graph):
+    """
+    Removes connected components with less than 20 nodes from the given graph.
+
+    Parameters
+    ----------
+    graph : LabeledGraph
+        Graph to be updated.
+    """
     nodes_to_remove = set()
     for nodes in nx.connected_components(graph):
         if len(nodes) < 20:
