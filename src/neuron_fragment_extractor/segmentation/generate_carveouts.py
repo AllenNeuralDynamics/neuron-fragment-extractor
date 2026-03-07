@@ -137,6 +137,7 @@ class CarveOutPipeline:
         dst : TensorStoreImage
             Image to be written to.
         """
+
         def worker():
             """
             Writes an array of ones to the mask (i.e. dst).
@@ -185,6 +186,7 @@ class CarveOutPipeline:
         dst : TensorStoreImage
             Image to be written to.
         """
+
         def worker():
             """
             Reads an array from the source image, then writes it to the
@@ -260,6 +262,7 @@ class CarveOutPipeline:
         level : int
             Pyramid level being generated.
         """
+
         def worker():
             """
             Writes downsampled patch to the destination image.
@@ -271,7 +274,7 @@ class CarveOutPipeline:
                     break
 
                 # Read
-                read_slices = self.node_to_slices(node, level=level-1)
+                read_slices = self.node_to_slices(node, level=level - 1)
                 patch = src.read(read_slices)
                 patch = img_util.resize(patch, dst_shape).astype(np.uint16)
 
@@ -482,7 +485,7 @@ def run(
     output_gcs_dir,
     output_s3_dir,
     num_levels=7,
-    radial_shape=(512, 512, 512)
+    radial_shape=(512, 512, 512),
 ):
     """
     Execute the full image carve-out generation pipeline.
@@ -542,8 +545,13 @@ if __name__ == "__main__":
         output_gcs_dir = "gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/754612/blocks/block_000/"
         output_s3_dir = "s3://aind-msma-morphology-data/anna.grim/image-carveouts/754612/blocks/block_000/"
     else:
-        input_swc_dir = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel/"
-        input_img_path = os.path.join(img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id), str(0))
+        input_swc_dir = (
+            f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel/"
+        )
+        input_img_path = os.path.join(
+            img_util.find_img_path("allen-nd-goog", "from_aind/", brain_id),
+            str(0),
+        )
         output_gcs_dir = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain{neuron_id}/"
         output_s3_dir = f"s3://aind-msma-morphology-data/anna.grim/image-carveouts/{brain_id}/whole-brain{neuron_id}/"
 
@@ -555,5 +563,5 @@ if __name__ == "__main__":
         output_gcs_dir,
         output_s3_dir,
         num_levels=num_levels,
-        radial_shape=radial_shape
+        radial_shape=radial_shape,
     )
