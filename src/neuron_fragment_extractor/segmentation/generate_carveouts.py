@@ -231,7 +231,7 @@ class CarveOutPipeline:
         root_path : str
             Path to root directory of the OME-Zarr image.
         """
-        for level in range(1, num_levels):
+        for level in range(1, self.num_levels):
             # Set source image
             src_path = os.path.join(root_path, str(level - 1))
             src = TensorStoreImage(img_path=src_path)
