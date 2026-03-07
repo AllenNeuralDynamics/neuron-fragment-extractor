@@ -90,7 +90,7 @@ class CarveOutPipeline:
 
         # Core data structures
         self.graph = graph
-        self.centers = self.list_centers()
+        self.centers = self.list_centers()[0:128]
 
     def __call__(self, filename, src=None):
         """
@@ -267,6 +267,7 @@ class CarveOutPipeline:
             """
             Writes downsampled patch to the destination image.
             """
+            patch = np.ones(dst_shape, dtype=np.uint16)
             while True:
                 # Get slices
                 node = slices_queue.get()
@@ -275,8 +276,9 @@ class CarveOutPipeline:
 
                 # Read
                 read_slices = self.node_to_slices(node, level=level - 1)
-                patch = src.read(read_slices)
-                patch = img_util.resize(patch, dst_shape).astype(np.uint16)
+                if "input.zarr" in src.path():
+                    patch = src.read(read_slices)
+                    patch = img_util.resize(patch, dst_shape).astype(np.uint16)
 
                 # Write
                 write_slices = self.node_to_slices(node, level=level)

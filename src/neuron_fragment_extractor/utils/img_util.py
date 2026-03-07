@@ -106,6 +106,20 @@ class TensorStoreImage:
         }
         return spec
 
+    def path(self):
+        """
+        Gets the image path.
+
+        Returns
+        -------
+        str
+            Image path
+        """
+        driver = "gs" if self.spec["driver"] == "gcs" else "s3"
+        bucket = self.spec["kvstore"]["bucket"]
+        path = self.spec["kvstore"]["path"]
+        return f"{driver}://{bucket}/{path}"
+
     def shape(self):
         """
         Gets the shape of the image.
@@ -228,7 +242,7 @@ def resize(img, new_shape):
         Resized 3D image with shape equal to "new_shape".
     """
     zoom_factors = np.array(new_shape) / np.array(img.shape)
-    return zoom(img, zoom_factors, order=1, prefilter=False)
+    return zoom(img, zoom_factors, order=0, prefilter=False)
 
 
 def find_img_path(bucket_name, root_dir, brain_id):
