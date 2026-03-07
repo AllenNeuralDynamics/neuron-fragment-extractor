@@ -106,6 +106,20 @@ class TensorStoreImage:
         }
         return spec
 
+    def path(self):
+        """
+        Gets the image path.
+
+        Returns
+        -------
+        str
+            Image path
+        """
+        driver = "gs" if self.spec["driver"] == "gcs" else "s3"
+        bucket = self.spec["kvstore"]["bucket"]
+        path = self.spec["kvstore"]["path"]
+        return f"{driver}://{bucket}/{path}"
+
     def shape(self):
         """
         Gets the shape of the image.
