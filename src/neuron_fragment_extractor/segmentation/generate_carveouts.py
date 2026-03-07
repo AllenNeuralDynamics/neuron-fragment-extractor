@@ -518,8 +518,8 @@ def run(
         output_gcs_dir,
         num_levels=num_levels,
     )
-    #pipeline("mask.zarr")
-    pipeline("input.zarr", src=src)
+    pipeline("mask.zarr")
+    #pipeline("input.zarr", src=src)
 
     # Write metadata
     metadata = {
