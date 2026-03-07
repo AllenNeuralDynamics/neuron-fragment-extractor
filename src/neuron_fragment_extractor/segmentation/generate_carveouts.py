@@ -519,7 +519,7 @@ def run(
         num_levels=num_levels,
     )
     pipeline("mask.zarr")
-    #pipeline("input.zarr", src=src)
+    pipeline("input.zarr", src=src)
 
     # Write metadata
     metadata = {
