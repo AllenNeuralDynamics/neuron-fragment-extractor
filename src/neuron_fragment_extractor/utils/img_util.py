@@ -242,7 +242,7 @@ def resize(img, new_shape):
         Resized 3D image with shape equal to "new_shape".
     """
     zoom_factors = np.array(new_shape) / np.array(img.shape)
-    return zoom(img, zoom_factors, order=0, prefilter=False)
+    return zoom(img, zoom_factors, order=1, prefilter=False)
 
 
 def find_img_path(bucket_name, root_dir, brain_id):

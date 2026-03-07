@@ -41,6 +41,7 @@ class CarveOutPipeline:
         radial_shape,
         output_gcs_dir,
         chunks=(1, 1, 256, 256, 256),
+        downsample_padding=8,
         num_levels=1,
         num_workers=32,
         prefetch=128,
@@ -62,6 +63,9 @@ class CarveOutPipeline:
         chunks : Tuple[int], optional
             Chunk shape used to write OME-Zarr image. Default is (1, 1, 128
             128, 128).
+        downsample_padding : int, optional
+            Padding added to source image patches during downsampling. Default
+            is 8.
         num_levels : int, optional
             Number of image pyramid levels in the OME-Zarr directory. Default
             is 7.
@@ -80,6 +84,7 @@ class CarveOutPipeline:
 
         # Instance attributes
         self.chunks = chunks
+        self.padding = downsample_padding
         self.img_shape = img_shape
         self.num_levels = num_levels
         self.num_workers = num_workers
@@ -125,7 +130,7 @@ class CarveOutPipeline:
 
         # Generate image pyramid
         print("Step 3: Generate Image Pyramid")
-        self.generate_pyramid(root_path)
+        self.create_pyramid(root_path)
 
     def generate_mask(self, dst):
         """
@@ -222,9 +227,9 @@ class CarveOutPipeline:
         for t in threads:
             t.join()
 
-    def generate_pyramid(self, root_path):
+    def create_pyramid(self, root_path):
         """
-        Generates OME-Zarr pyramid using TensorStore.
+        Creates OME-Zarr pyramid using TensorStore.
 
         Parameters
         ----------
@@ -268,17 +273,21 @@ class CarveOutPipeline:
             Writes downsampled patch to the destination image.
             """
             patch = np.ones(dst_shape, dtype=np.uint16)
+            pad_dst_shape = [s + self.padding for s in dst_shape]
             while True:
                 # Get slices
                 node = slices_queue.get()
                 if node is None:
                     break
 
-                # Read
-                read_slices = self.node_to_slices(node, level=level - 1)
+                # Read and downsample
                 if "input.zarr" in src.path():
+                    read_slices = self.node_to_slices(node, level - 1, True)
                     patch = src.read(read_slices)
-                    patch = img_util.resize(patch, dst_shape).astype(np.uint16)
+                    patch = img_util.resize(patch, pad_dst_shape)
+
+                    unpad_slice = slice(self.padding // 2, -self.padding // 2)
+                    patch = patch[(unpad_slice,) * 3].astype(np.uint16)
 
                 # Write
                 write_slices = self.node_to_slices(node, level=level)
@@ -381,8 +390,9 @@ class CarveOutPipeline:
             within the image bounds, otherwise False.
         """
         voxel = self.graph.node_voxel(node)
+        shape = np.array(self.img_shape[2:], dtype=int) + self.padding
         is_contained = img_util.is_patch_contained(
-            voxel, self.radial_shape, self.img_shape[2:]
+            voxel, self.radial_shape, shape
         )
         return is_contained
 
@@ -417,7 +427,7 @@ class CarveOutPipeline:
             centers.append(i)
         return [c for c in centers if self.is_patch_contained(c)]
 
-    def node_to_slices(self, node, level=0):
+    def node_to_slices(self, node, level=0, use_padding=False):
         """
         Converts a node to a set of array slices for extracting a patch
         from a specific pyramid level of the image.
@@ -429,6 +439,9 @@ class CarveOutPipeline:
             patch.
         level : int, optional
             Pyramid level for which slices are computed. Default is 0.
+        use_padding : bool, optional
+            Indication of whether to add padding to generated slices. Default
+            is False.
 
         Returns
         -------
@@ -436,8 +449,9 @@ class CarveOutPipeline:
             Slice objects specifying the spatial region of the patch centered
             at the node for the requested pyramid level.
         """
+        padding = self.padding if use_padding else 0
         voxel = [u // 2**level for u in self.graph.node_voxel(node)]
-        shape = [s // 2**level for s in self.radial_shape]
+        shape = [s // 2**level + padding for s in self.radial_shape]
         return img_util.get_center_slices(voxel, shape)
 
     def write_zattrs(self, root_path):
@@ -504,7 +518,7 @@ def run(
         output_gcs_dir,
         num_levels=num_levels,
     )
-    pipeline("mask.zarr")
+    #pipeline("mask.zarr")
     pipeline("input.zarr", src=src)
 
     # Write metadata
