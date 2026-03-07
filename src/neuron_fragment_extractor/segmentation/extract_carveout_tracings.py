@@ -50,7 +50,7 @@ def load_skeletons():
         label_mask=mask,
         use_anisotropy=True,
     )
-    graphs = graph_loader(gt_swcs_path)
+    graphs = graph_loader(swcs_path)
     return graphs.values()
 
 
@@ -88,7 +88,7 @@ if __name__ == "__main__":
     brain_id = "802449"
 
     # Paths
-    gt_swcs_path = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/world"
+    swcs_path = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/world"
     mask_path = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain-N002/mask.zarr/0"
     output_dir = "/home/jupyter/results/carveout_skeletons/test"
 
