@@ -95,7 +95,7 @@ class CarveOutPipeline:
 
         # Core data structures
         self.graph = graph
-        self.centers = self.list_centers()[0:128]
+        self.centers = self.list_centers()
 
     def __call__(self, filename, src=None):
         """
