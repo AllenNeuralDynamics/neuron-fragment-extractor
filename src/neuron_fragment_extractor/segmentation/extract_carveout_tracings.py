@@ -86,11 +86,12 @@ def remove_small_components(graph):
 if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
+    neuron_id = "N036"
 
     # Paths
     swcs_path = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/world"
-    mask_path = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain-N002/mask.zarr/0"
-    output_dir = "/home/jupyter/results/carveout_skeletons/test"
+    mask_path = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain-{neuron_id}/mask.zarr/0"
+    output_dir = f"/home/jupyter/results/carveout_skeletons/{neuron_id}"
 
     # Run code
     main()
