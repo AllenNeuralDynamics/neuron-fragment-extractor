@@ -21,9 +21,15 @@ from neuron_fragment_extractor.utils.img_util import TensorStoreImage
 from neuron_fragment_extractor.utils import img_util, util
 
 
-def main():
+def main(
+    img_path,
+    output_dir,
+    chunk_size=512,
+    projection_dim=4,
+    step_size=512,
+):
     # Initializations
-    permutation = get_permutation()
+    permutation = get_permutation(projection_dim)
     rng = np.random.default_rng(0)
     util.mkdir(output_dir, delete=True)
 
@@ -34,7 +40,7 @@ def main():
 
     print("Image Shape:", img.shape())
     print("MIPs Shape:", img.shape()[2:4])
-    print("# MIPs:", len(np.arange(0, img.shape()[-1], step_size)))
+    print("# MIPs:", img.shape()[-1] // step_size)
 
     # Generate MIPs
     color_mapping = rng.integers(0, 256, size=(10**9, 3), dtype=np.uint8)
@@ -51,9 +57,12 @@ def main():
             imageio.imwrite(path, color_mapping[mip])
 
 
-def generate_mip(img, z_start):
+def generate_mip(img, z_start, chunk_size=512, num_workers=32, step_size=512):
 
     def submit_job():
+        """
+        Submits a thread to be processed.
+        """
         try:
             start = next(iterator)
             thread = executor.submit(worker, start)
@@ -62,20 +71,28 @@ def generate_mip(img, z_start):
             pass
 
     def worker(start):
+        """
+        Reads an image patch and computes the MIP.
+
+        Parameters
+        ----------
+        start : Tuple[int]
+            Starting voxel coordinate of image patch to be read.
+        """
         slices = img_util.get_slices(start, shape)
         patch = img.read(slices)
         return np.max(patch, axis=-1)
 
     # Initializations
+    iterator = generate_start_coordinates(img.shape(), step_size, z_start)
+    mip = np.zeros(img.shape()[2:4], dtype=int)
     shape = (chunk_size, chunk_size, step_size)
     total_jobs = count_jobs(img)
-    iterator = generate_jobs(img.shape(), z_start)
-    mip = np.zeros(img.shape()[2:4], dtype=int)
-    pending = dict()
 
     # Main
-    with ThreadPoolExecutor(max_workers=64) as executor:
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
         # Assign initial threads
+        pending = dict()
         for num_jobs in range(num_workers):
             submit_job()
 
@@ -99,6 +116,23 @@ def generate_mip(img, z_start):
 
 
 def reassign_labels(mip, label_mapping):
+    """
+    Reassigns labels in an image, removing small segments and mapping
+    unknown labels to new unique integers.
+
+    Parameters
+    ----------
+    mip : numpy.ndarray
+        Input labeled image, where each segment has a unique integer label.
+    label_mapping : Dict[int, int]
+        Dictionary mapping existing labels to new labels. This mapping
+        will be updated in-place with any new labels encountered in "mip".
+
+    Returns
+    -------
+    mip : numpy.ndarray
+        Remapped image with updated labels.
+    """
     mip = remove_small_segments(mip, 64)
     for label in fastremap.unique(mip):
         if label not in label_mapping:
@@ -108,20 +142,83 @@ def reassign_labels(mip, label_mapping):
 
 # --- Helpers ---
 def count_jobs(img):
+    """
+    Computes the number of chunk-based jobs needed to process an image.
+
+    Parameters
+    ----------
+    img : array-like
+        Image object where dimensions 2 and 3 correspond to the spatial axes
+        being chunked.
+    chunk_size : int
+        Size of each chunk along the selected dimensions.
+
+    Returns
+    -------
+    int
+        Total number of full chunks (jobs) across the specified dimensions.
+    """
     return np.prod([img.shape()[d] // chunk_size for d in [2, 3]])
 
 
 def dimension_iterator(length, step_size):
+    """
+    Generates starting indices for iterating over a dimension with a fixed
+    step size.
+
+    Parameters
+    ----------
+    length : int
+        Total length of the dimension being iterated over.
+    step_size : int
+        Size of each step along the dimension.
+
+    Returns
+    -------
+    range
+        Starting indices of each step.
+    """
     return range(0, length - step_size, step_size)
 
 
-def generate_jobs(img_shape, z_start):
+def generate_start_coordinates(img_shape, step_size, z_start):
+    """
+    Generates starting coordinates for patch-wise processing of a 3D image.
+
+    Parameters
+    ----------
+    img_shape : Tuple[int]
+        Shape of the image to be processed.
+    step_size : int
+        Size of each patch along X and Y.
+    z_start : int
+        Fixed starting index along the Z dimension for the patches.
+
+    Yields
+    ------
+    Tuple[int]
+        Starting coordinates of a patch.
+    """
     for x_start in dimension_iterator(img_shape[2], step_size):
         for y_start in dimension_iterator(img_shape[3], step_size):
             yield (x_start, y_start, z_start)
 
 
-def get_permutation():
+def get_permutation(projection_dim):
+    """
+    Generate a permutation of the indices [0, 1, 2, 3, 4] by moving the
+    specified dimension to the last position.
+
+    Parameters
+    ----------
+    projection_dim : int
+        Dimension that MIPs are generated by traversing through.
+
+    Returns
+    -------
+    List[int]
+        Permuted indices.
+    """
     permutation = np.arange(5)
     permutation[projection_dim], permutation[4] = 4, projection_dim
     return permutation.tolist()
@@ -155,7 +252,6 @@ if __name__ == "__main__":
     # Parameters
     chunk_size = 512
     projection_dim = 4
-    num_workers = 32
     step_size = 512
 
     # Paths
@@ -163,4 +259,10 @@ if __name__ == "__main__":
     output_dir = "/home/jupyter/results/mips_whole-brain/784802"
 
     # Run code
-    main()
+    main(
+        img_path,
+        output_dir,
+        chunk_size=chunk_size,
+        projection_dim=projection_dim,
+        step_size=step_size,
+    )
