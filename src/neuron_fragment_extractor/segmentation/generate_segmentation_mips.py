@@ -20,10 +20,6 @@ import os
 from neuron_fragment_extractor.utils.img_util import TensorStoreImage
 from neuron_fragment_extractor.utils import img_util, util
 
-chunk_size = 512
-step_size = 500
-num_workers = 32
-
 
 def main():
     # Initializations
@@ -41,20 +37,17 @@ def main():
     print("# MIPs:", len(np.arange(0, img.shape()[-1], step_size)))
 
     # Generate MIPs
-    color_mapping = rng.integers(0, 256, size=(10**8, 3), dtype=np.uint8)
+    color_mapping = rng.integers(0, 256, size=(10**9, 3), dtype=np.uint8)
     color_mapping[0] = 0
     label_mapping = {0: 0}
-    for z_start in np.arange(0, img.shape()[-1], step_size):
+    for z_start in tqdm(np.arange(0, img.shape()[-1], step_size)):
         # Compute MIP
-        z_start = img.shape()[-1] // 2
         mip = generate_mip(img, z_start)
         mip = reassign_labels(mip, label_mapping)
-        print("# Unique segments:", len(label_mapping))
 
         # Save result
         path = os.path.join(output_dir, f"mip_{z_start}.png")
         imageio.imwrite(path, color_mapping[mip])
-        stop
 
 
 def generate_mip(img, z_start):
@@ -80,7 +73,6 @@ def generate_mip(img, z_start):
     pending = dict()
 
     # Main
-    pbar = tqdm(total=total_jobs, desc="Compute MIP")
     with ThreadPoolExecutor(max_workers=64) as executor:
         # Assign initial threads
         for num_jobs in range(num_workers):
@@ -97,7 +89,6 @@ def generate_mip(img, z_start):
             x_slice = slice(x_start, x_start + chunk_size)
             y_slice = slice(y_start, y_start + chunk_size)
             mip[(x_slice, y_slice)] = mip_xy
-            pbar.update(1)
 
             # Check whether to submit new job
             if num_jobs < total_jobs:
