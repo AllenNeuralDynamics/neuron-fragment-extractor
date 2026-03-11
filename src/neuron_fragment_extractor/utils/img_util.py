@@ -10,6 +10,7 @@ Code for working with images.
 
 from scipy.ndimage import zoom
 
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorstore as ts
@@ -35,9 +36,18 @@ class TensorStoreImage:
             TensorStore specification describing how the dataset is stored and
             accessed (e.g., driver, kvstore, metadata).
         """
+        # Open image
         assert img_path or spec
         self.spec = spec or self.get_spec(img_path)
         self.img = ts.open(self.spec).result()
+
+        # Check for Google segmentation
+        if "from_google" in self.spec["kvstore"]["path"]:
+            self.permute_axes((3, 2, 1, 0))
+
+        # Check dimensions
+        while self.img.ndim < 5:
+            self.img = self.img[ts.newaxis, ...]
 
     # --- Core Routines ---
     def read(self, slices):
@@ -119,6 +129,17 @@ class TensorStoreImage:
         bucket = self.spec["kvstore"]["bucket"]
         path = self.spec["kvstore"]["path"]
         return f"{driver}://{bucket}/{path}"
+
+    def permute_axes(self, permutation):
+        """
+        Applies the given permutation to the image axes.
+
+        Parameters
+        ----------
+        permutation : List[int]
+            Permutation to be applied to image axes.
+        """
+        self.img = self.img[ts.d[:].transpose[permutation]]
 
     def shape(self):
         """
@@ -289,6 +310,8 @@ def get_driver(img_path):
         return "zarr"
     elif ".n5" in img_path:
         return "n5"
+    elif is_precomputed(img_path) or "from_google" in img_path:
+        return "neuroglancer_precomputed"
     else:
         raise ValueError(f"Unsupported image format: {img_path}")
 
@@ -385,6 +408,43 @@ def is_patch_contained(center, patch_shape, image_shape):
     start = center - half
     end = start + patch_shape
     return np.all(start >= 0) and np.all(end <= image_shape)
+
+def is_precomputed(img_path):
+    """
+    Checks if the path points to a Neuroglancer precomputed dataset.
+
+    Parameters
+    ----------
+    img_path : str
+        Path to be checked (can be local, GCS, or S3).
+
+    Returns
+    -------
+    bool
+        True if the path appears to be a Neuroglancer precomputed dataset.
+    """
+    try:
+        # Build kvstore spec
+        bucket_name, path = util.parse_cloud_path(img_path)
+        kv = {
+            "driver": get_storage_driver(img_path),
+            "bucket": bucket_name,
+            "path": path
+        }
+
+        # Open the info file
+        store = ts.KvStore.open(kv).result()
+        raw = store.read(b"info").result()
+
+        # Only proceed if the key exists and has content
+        if raw.state != "missing" and raw.value:
+            info = json.loads(raw.value.decode("utf8"))
+            is_valid_type = info.get("type") in ("image", "segmentation")
+            if isinstance(info, dict) and is_valid_type and "scales" in info:
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def plot_mips(img, output_path=None, vmax=None):
