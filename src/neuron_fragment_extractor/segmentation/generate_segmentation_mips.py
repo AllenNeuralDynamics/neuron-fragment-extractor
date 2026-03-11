@@ -46,8 +46,9 @@ def main():
         mip = reassign_labels(mip, label_mapping)
 
         # Save result
-        path = os.path.join(output_dir, f"mip_{z_start}.png")
-        imageio.imwrite(path, color_mapping[mip])
+        if len(label_mapping) > 1:
+            path = os.path.join(output_dir, f"mip_{z_start}.png")
+            imageio.imwrite(path, color_mapping[mip])
 
 
 def generate_mip(img, z_start):
@@ -155,7 +156,7 @@ if __name__ == "__main__":
     chunk_size = 512
     projection_dim = 4
     num_workers = 32
-    step_size = 500
+    step_size = 512
 
     # Paths
     img_path = "gs://allen-nd-goog/from_google/784802/whole_brain/jin_masked_mean40_stddev105"

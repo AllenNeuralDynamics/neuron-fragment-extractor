@@ -43,12 +43,10 @@ def load_skeletons():
     label_handler = LabelHandler()
     mask = TensorStoreImage(mask_path)
     graph_loader = GraphLoader(
-        anisotropy=(0.748, 0.748, 1.0),
         fix_label_misalignments=False,
         is_groundtruth=True,
         label_handler=label_handler,
         label_mask=mask,
-        use_anisotropy=True,
     )
     graphs = graph_loader(swcs_path)
     return graphs.values()
@@ -86,10 +84,10 @@ def remove_small_components(graph):
 if __name__ == "__main__":
     # Parameters
     brain_id = "802449"
-    neuron_id = "N036"
+    neuron_id = "N039"
 
     # Paths
-    swcs_path = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/world"
+    swcs_path = f"gs://allen-nd-goog/ground_truth_tracings/{brain_id}/voxel"
     mask_path = f"gs://allen-nd-goog/from_aind/agrim-experimental/image-carveouts/{brain_id}/whole-brain-{neuron_id}/mask.zarr/0"
     output_dir = f"/home/jupyter/results/carveout_skeletons/{neuron_id}"
 
