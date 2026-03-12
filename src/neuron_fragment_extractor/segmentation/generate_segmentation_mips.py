@@ -31,6 +31,7 @@ def generate_segmentation_mips(
     output_dir,
     chunk_size=1024,
     max_processes=4,
+    projection_depth=512,
     projection_dim=4,
     max_threads_per_process=8,
 ):
@@ -301,6 +302,7 @@ if __name__ == "__main__":
         output_dir,
         chunk_size=chunk_size,
         max_processes=max_processes,
+        projection_depth=projection_depth,
         projection_dim=projection_dim,
         max_threads_per_process=max_threads_per_process,
     )
