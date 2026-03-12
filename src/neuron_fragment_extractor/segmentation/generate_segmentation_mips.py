@@ -29,29 +29,30 @@ from neuron_fragment_extractor.utils import img_util, util
 def generate_segmentation_mips(
     img_path,
     output_dir,
-    chunk_size=1024,
+    chunk_size=512,
     max_processes=4,
     projection_depth=512,
     projection_dim=4,
     max_threads_per_process=8,
 ):
     def submit_job():
-        z_start = starts.pop(0)
-        process = executor.submit(
-            generate_single_mip_process,
-            img_path,
-            permutation,
-            z_start,
-            chunk_size,
-            projection_depth,
-            max_threads_per_process,
-        )
-        pending[process] = z_start
+        if starts:
+            z_start = starts.pop()
+            process = executor.submit(
+                generate_single_mip,
+                img_path,
+                permutation,
+                z_start,
+                chunk_size,
+                projection_depth,
+                max_threads_per_process,
+            )
+            pending[process] = z_start
 
     def save_task(data, z_val):
-        processed_mip = reassign_labels(data, label_mapping)
+        data = reassign_labels(data, label_mapping)
         out_path = os.path.join(output_dir, f"mip_{z_val}.png")
-        imageio.imwrite(out_path, color_mapping[processed_mip])
+        imageio.imwrite(out_path, color_mapping[data])
 
     # Load image
     permutation = get_permutation(projection_dim)
@@ -91,7 +92,7 @@ def generate_segmentation_mips(
             pbar.update(1)
 
 
-def generate_single_mip_process(
+def generate_single_mip(
     img_path,
     permutation,
     z_start,
@@ -132,9 +133,9 @@ def generate_single_mip_process(
     img.permute_axes(permutation)
 
     # Initializations
-    mip = np.zeros(img.shape()[2:4], dtype=np.uint16)
+    mip = np.zeros(img.shape()[2:4], dtype=int)
     shape = (chunk_size, chunk_size, projection_depth)
-    starts = generate_start_coordinates(img.shape(), projection_depth, z_start)
+    starts = generate_chunk_starts(img.shape(), chunk_size, z_start)
 
     # Main
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
@@ -217,7 +218,7 @@ def dimension_iterator(length, projection_depth):
     return range(0, length - projection_depth, projection_depth)
 
 
-def generate_start_coordinates(img_shape, projection_depth, z_start):
+def generate_chunk_starts(img_shape, step_size, z_start):
     """
     Generates starting coordinates for patch-wise processing of a 3D image.
 
@@ -235,8 +236,8 @@ def generate_start_coordinates(img_shape, projection_depth, z_start):
     Tuple[int]
         Starting coordinates of a patch.
     """
-    for x_start in dimension_iterator(img_shape[2], projection_depth):
-        for y_start in dimension_iterator(img_shape[3], projection_depth):
+    for x_start in dimension_iterator(img_shape[2], step_size):
+        for y_start in dimension_iterator(img_shape[3], step_size):
             yield (x_start, y_start, z_start)
 
 
@@ -287,7 +288,7 @@ def remove_small_segments(label_mask, min_size):
 if __name__ == "__main__":
     # Parameters
     chunk_size = 512
-    max_processes = 4
+    max_processes = 8
     max_threads_per_process = 8
     projection_dim = 4
     projection_depth = 512
