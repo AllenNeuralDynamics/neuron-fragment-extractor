@@ -178,26 +178,6 @@ def reassign_labels(mip, label_mapping):
 
 
 # --- Helpers ---
-def count_jobs(img, chunk_size):
-    """
-    Computes the number of chunk-based jobs needed to process an image.
-
-    Parameters
-    ----------
-    img : array-like
-        Image object where dimensions 2 and 3 correspond to the spatial axes
-        being chunked.
-    chunk_size : int
-        Size of each chunk along the selected dimensions.
-
-    Returns
-    -------
-    int
-        Total number of full chunks (jobs) across the specified dimensions.
-    """
-    return np.prod([img.shape()[d] // f for d in [2, 3]])
-
-
 def dimension_iterator(length, step_size):
     """
     Generates starting indices for iterating over a dimension with a fixed
@@ -288,7 +268,7 @@ def remove_small_segments(label_mask, min_size):
 if __name__ == "__main__":
     # Parameters
     chunk_size = 512
-    max_processes = 8
+    max_processes = 6
     max_threads_per_process = 8
     projection_dim = 4
     projection_depth = 512
