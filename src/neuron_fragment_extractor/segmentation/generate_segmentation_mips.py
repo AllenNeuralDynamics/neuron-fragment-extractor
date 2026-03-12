@@ -26,7 +26,7 @@ from neuron_fragment_extractor.utils.img_util import TensorStoreImage
 from neuron_fragment_extractor.utils import img_util, util
 
 
-def main(
+def generate_segmentation_mips(
     img_path,
     output_dir,
     chunk_size=1024,
@@ -168,7 +168,7 @@ def reassign_labels(mip, label_mapping):
     mip : numpy.ndarray
         Remapped image with updated labels.
     """
-    mip = remove_small_segments(mip, 64)
+    mip = remove_small_segments(mip, 256)
     for label in fastremap.unique(mip):
         if label not in label_mapping:
             label_mapping[label] = len(label_mapping)
@@ -296,7 +296,7 @@ if __name__ == "__main__":
     output_dir = "/home/jupyter/results/mips_whole-brain/784666"
 
     # Run code
-    main(
+    generate_segmentation_mips(
         img_path,
         output_dir,
         chunk_size=chunk_size,
