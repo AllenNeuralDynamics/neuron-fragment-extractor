@@ -32,7 +32,7 @@ def main(
     chunk_size=1024,
     max_processes=4,
     projection_dim=4,
-    threads_per_process=8,
+    max_threads_per_process=8,
 ):
     def submit_job():
         z_start = starts.pop(0)
@@ -43,7 +43,7 @@ def main(
             z_start,
             chunk_size,
             chunk_size,
-            threads_per_process,
+            max_threads_per_process,
         )
         pending[process] = z_start
 
@@ -72,7 +72,7 @@ def main(
          ThreadPoolExecutor(max_workers=4) as writer_executor:
         # Start processes
         pending = dict()
-        starts = list(dimension_iterator(img.shape()[-1], step_size))
+        starts = list(dimension_iterator(img.shape()[-1], projection_depth))
         while len(pending) < max_processes and starts:
             submit_job()
 
@@ -95,7 +95,7 @@ def generate_single_mip_process(
     permutation,
     z_start,
     chunk_size=512,
-    step_size=512,
+    projection_depth=512,
     max_threads=24
 ):
     def submit_job():
@@ -132,8 +132,8 @@ def generate_single_mip_process(
 
     # Initializations
     mip = np.zeros(img.shape()[2:4], dtype=np.uint16)
-    shape = (chunk_size, chunk_size, step_size)
-    starts = generate_start_coordinates(img.shape(), step_size, z_start)
+    shape = (chunk_size, chunk_size, projection_depth)
+    starts = generate_start_coordinates(img.shape(), projection_depth, z_start)
 
     # Main
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
@@ -196,7 +196,7 @@ def count_jobs(img, chunk_size):
     return np.prod([img.shape()[d] // chunk_size for d in [2, 3]])
 
 
-def dimension_iterator(length, step_size):
+def dimension_iterator(length, projection_depth):
     """
     Generates starting indices for iterating over a dimension with a fixed
     step size.
@@ -205,7 +205,7 @@ def dimension_iterator(length, step_size):
     ----------
     length : int
         Total length of the dimension being iterated over.
-    step_size : int
+    projection_depth : int
         Size of each step along the dimension.
 
     Returns
@@ -213,10 +213,10 @@ def dimension_iterator(length, step_size):
     range
         Starting indices of each step.
     """
-    return range(0, length - step_size, step_size)
+    return range(0, length - projection_depth, projection_depth)
 
 
-def generate_start_coordinates(img_shape, step_size, z_start):
+def generate_start_coordinates(img_shape, projection_depth, z_start):
     """
     Generates starting coordinates for patch-wise processing of a 3D image.
 
@@ -224,7 +224,7 @@ def generate_start_coordinates(img_shape, step_size, z_start):
     ----------
     img_shape : Tuple[int]
         Shape of the image to be processed.
-    step_size : int
+    projection_depth : int
         Size of each patch along X and Y.
     z_start : int
         Fixed starting index along the Z dimension for the patches.
@@ -234,8 +234,8 @@ def generate_start_coordinates(img_shape, step_size, z_start):
     Tuple[int]
         Starting coordinates of a patch.
     """
-    for x_start in dimension_iterator(img_shape[2], step_size):
-        for y_start in dimension_iterator(img_shape[3], step_size):
+    for x_start in dimension_iterator(img_shape[2], projection_depth):
+        for y_start in dimension_iterator(img_shape[3], projection_depth):
             yield (x_start, y_start, z_start)
 
 
@@ -286,11 +286,10 @@ def remove_small_segments(label_mask, min_size):
 if __name__ == "__main__":
     # Parameters
     chunk_size = 512
-    projection_dim = 4
-    step_size = 512
-
     max_processes = 4
-    threads_per_process = 8
+    max_threads_per_process = 8
+    projection_dim = 4
+    projection_depth = 512
 
     # Paths
     img_path = "gs://allen-nd-goog/from_google/784666/whole_brain/mean40.stddev105.mask.136168199.no_omitted_20k.ffn.mt_0.1"
@@ -303,5 +302,5 @@ if __name__ == "__main__":
         chunk_size=chunk_size,
         max_processes=max_processes,
         projection_dim=projection_dim,
-        threads_per_process=threads_per_process,
+        max_threads_per_process=max_threads_per_process,
     )
