@@ -42,7 +42,7 @@ def generate_segmentation_mips(
             permutation,
             z_start,
             chunk_size,
-            chunk_size,
+            projection_depth,
             max_threads_per_process,
         )
         pending[process] = z_start
