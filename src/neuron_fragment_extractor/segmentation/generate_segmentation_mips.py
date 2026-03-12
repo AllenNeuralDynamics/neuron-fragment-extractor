@@ -195,10 +195,10 @@ def count_jobs(img, chunk_size):
     int
         Total number of full chunks (jobs) across the specified dimensions.
     """
-    return np.prod([img.shape()[d] // chunk_size for d in [2, 3]])
+    return np.prod([img.shape()[d] // f for d in [2, 3]])
 
 
-def dimension_iterator(length, projection_depth):
+def dimension_iterator(length, step_size):
     """
     Generates starting indices for iterating over a dimension with a fixed
     step size.
@@ -207,7 +207,7 @@ def dimension_iterator(length, projection_depth):
     ----------
     length : int
         Total length of the dimension being iterated over.
-    projection_depth : int
+    step_size : int
         Size of each step along the dimension.
 
     Returns
@@ -215,7 +215,7 @@ def dimension_iterator(length, projection_depth):
     range
         Starting indices of each step.
     """
-    return range(0, length - projection_depth, projection_depth)
+    return range(0, length - step_size, step_size)
 
 
 def generate_chunk_starts(img_shape, step_size, z_start):
