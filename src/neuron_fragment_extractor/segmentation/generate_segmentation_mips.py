@@ -9,11 +9,16 @@ dimenion of a whole-brain segmentation.
 
 """
 
-from concurrent.futures import as_completed, ThreadPoolExecutor
+from concurrent.futures import (
+    as_completed,
+    ProcessPoolExecutor as Executor,
+    ThreadPoolExecutor,
+)
 from tqdm import tqdm
 
 import fastremap
 import imageio
+import multiprocessing
 import numpy as np
 import os
 
@@ -24,49 +29,82 @@ from neuron_fragment_extractor.utils import img_util, util
 def main(
     img_path,
     output_dir,
-    chunk_size=512,
+    chunk_size=1024,
+    max_processes=4,
     projection_dim=4,
-    step_size=512,
+    threads_per_process=8,
 ):
-    # Initializations
-    permutation = get_permutation(projection_dim)
-    rng = np.random.default_rng(0)
-    util.mkdir(output_dir, delete=True)
+    def submit_job():
+        z_start = starts.pop(0)
+        process = executor.submit(
+            generate_single_mip_process,
+            img_path,
+            permutation,
+            z_start,
+            chunk_size,
+            chunk_size,
+            threads_per_process,
+        )
+        pending[process] = z_start
+
+    def save_task(data, z_val):
+        processed_mip = reassign_labels(data, label_mapping)
+        out_path = os.path.join(output_dir, f"mip_{z_val}.png")
+        imageio.imwrite(out_path, color_mapping[processed_mip])
 
     # Load image
+    permutation = get_permutation(projection_dim)
     assert projection_dim in np.arange(2, 5)
     img = TensorStoreImage(img_path=img_path)
     img.permute_axes(permutation)
+    print("\nImage Shape:", img.shape())
 
-    print("Image Shape:", img.shape())
-    print("MIPs Shape:", img.shape()[2:4])
-    print("# MIPs:", img.shape()[-1] // step_size)
-
-    # Generate MIPs
+    # Mappings
+    rng = np.random.default_rng(0)
     color_mapping = rng.integers(0, 256, size=(10**9, 3), dtype=np.uint8)
     color_mapping[0] = 0
     label_mapping = {0: 0}
-    for z_start in tqdm(np.arange(0, img.shape()[-1], step_size)):
-        # Compute MIP
-        mip = generate_mip(img, z_start)
-        mip = reassign_labels(mip, label_mapping)
 
-        # Save result
-        if len(label_mapping) > 1:
-            path = os.path.join(output_dir, f"mip_{z_start}.png")
-            imageio.imwrite(path, color_mapping[mip])
+    # Generate MIPs
+    util.mkdir(output_dir, delete=True)
+    mp = multiprocessing.get_context('spawn')
+    with Executor(max_workers=max_processes, mp_context=mp) as executor, \
+         ThreadPoolExecutor(max_workers=4) as writer_executor:
+        # Start processes
+        pending = dict()
+        starts = list(dimension_iterator(img.shape()[-1], step_size))
+        while len(pending) < max_processes and starts:
+            submit_job()
+
+        # Manage processes
+        pbar = tqdm(total=len(starts)+len(pending), desc="Generate MIPs")
+        while pending:
+            # Extract results
+            process = next(as_completed(pending))
+            z_done = pending.pop(process)
+            mip = process.result()
+
+            # Assign new jobs
+            submit_job()
+            writer_executor.submit(save_task, mip, z_done)
+            pbar.update(1)
 
 
-def generate_mip(img, z_start, chunk_size=512, num_workers=32, step_size=512):
-
+def generate_single_mip_process(
+    img_path,
+    permutation,
+    z_start,
+    chunk_size=512,
+    step_size=512,
+    max_threads=24
+):
     def submit_job():
         """
         Submits a thread to be processed.
         """
         try:
-            start = next(iterator)
-            thread = executor.submit(worker, start)
-            pending[thread] = start
+            start = next(starts)
+            pending.add(executor.submit(worker, start))
         except StopIteration:
             pass
 
@@ -79,39 +117,36 @@ def generate_mip(img, z_start, chunk_size=512, num_workers=32, step_size=512):
         start : Tuple[int]
             Starting voxel coordinate of image patch to be read.
         """
+        # Get slices
         slices = img_util.get_slices(start, shape)
+        slices_xy = (slices[2], slices[3])
+
+        # Compute MIP
         patch = img.read(slices)
-        return np.max(patch, axis=-1)
+        np.maximum.reduce(patch, axis=-1, out=mip[slices_xy])
+        return True
+
+    # Open image
+    img = TensorStoreImage(img_path=img_path)
+    img.permute_axes(permutation)
 
     # Initializations
-    iterator = generate_start_coordinates(img.shape(), step_size, z_start)
-    mip = np.zeros(img.shape()[2:4], dtype=int)
+    mip = np.zeros(img.shape()[2:4], dtype=np.uint16)
     shape = (chunk_size, chunk_size, step_size)
-    total_jobs = count_jobs(img)
+    starts = generate_start_coordinates(img.shape(), step_size, z_start)
 
     # Main
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        # Assign initial threads
-        pending = dict()
-        for num_jobs in range(num_workers):
+    with ThreadPoolExecutor(max_workers=max_threads) as executor:
+        # Starts threads
+        pending = set()
+        for _ in range(max_threads):
             submit_job()
 
-        # Process threads
+        # Manage threads
         while pending:
-            # Wait for a job to complete
-            thread = as_completed(pending.keys(), timeout=None).__next__()
-            x_start, y_start, _ = pending.pop(thread)
-            mip_xy = thread.result()
-
-            # Store results
-            x_slice = slice(x_start, x_start + chunk_size)
-            y_slice = slice(y_start, y_start + chunk_size)
-            mip[(x_slice, y_slice)] = mip_xy
-
-            # Check whether to submit new job
-            if num_jobs < total_jobs:
-                submit_job()
-                num_jobs += 1
+            thread = next(as_completed(pending, timeout=None))
+            pending.remove(thread)
+            submit_job()
     return mip
 
 
@@ -141,7 +176,7 @@ def reassign_labels(mip, label_mapping):
 
 
 # --- Helpers ---
-def count_jobs(img):
+def count_jobs(img, chunk_size):
     """
     Computes the number of chunk-based jobs needed to process an image.
 
@@ -254,15 +289,19 @@ if __name__ == "__main__":
     projection_dim = 4
     step_size = 512
 
+    max_processes = 4
+    threads_per_process = 8
+
     # Paths
-    img_path = "gs://allen-nd-goog/from_google/784802/whole_brain/jin_masked_mean40_stddev105"
-    output_dir = "/home/jupyter/results/mips_whole-brain/784802"
+    img_path = "gs://allen-nd-goog/from_google/784666/whole_brain/mean40.stddev105.mask.136168199.no_omitted_20k.ffn.mt_0.1"
+    output_dir = "/home/jupyter/results/mips_whole-brain/784666"
 
     # Run code
     main(
         img_path,
         output_dir,
         chunk_size=chunk_size,
+        max_processes=max_processes,
         projection_dim=projection_dim,
-        step_size=step_size,
+        threads_per_process=threads_per_process,
     )
