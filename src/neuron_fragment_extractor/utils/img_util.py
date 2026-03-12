@@ -409,6 +409,7 @@ def is_patch_contained(center, patch_shape, image_shape):
     end = start + patch_shape
     return np.all(start >= 0) and np.all(end <= image_shape)
 
+
 def is_precomputed(img_path):
     """
     Checks if the path points to a Neuroglancer precomputed dataset.
