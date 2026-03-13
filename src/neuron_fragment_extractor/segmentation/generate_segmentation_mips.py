@@ -14,7 +14,6 @@ from concurrent.futures import (
     ProcessPoolExecutor as Executor,
     ThreadPoolExecutor,
 )
-from time import time
 from tqdm import tqdm
 
 import fastremap
@@ -33,7 +32,7 @@ def generate_segmentation_mips(
     chunk_size=512,
     max_processes=4,
     max_threads_per_process=8,
-    min_segment_size=0
+    min_segment_size=0,
     projection_depth=512,
     projection_dim=4,
 ):
@@ -149,18 +148,8 @@ def generate_single_mip(
             submit_job()
 
         # Manage threads
-        t0 = time()
-        jobs = list(generate_chunk_starts(img.shape(), chunk_size, z_start))
-        num_jobs = len(jobs)
-        dt = num_jobs // 20
-        t = num_jobs // 20
-        cnt = 0
         while pending:
             thread = next(as_completed(pending, timeout=None))
-            cnt += 1
-            if cnt > t:
-                print(f"Completed {round(cnt / num_jobs, 2)} | Elapsed Time {time() - t0}")
-                t += dt
             pending.remove(thread)
             submit_job()
     return mip
