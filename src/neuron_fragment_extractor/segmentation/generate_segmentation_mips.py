@@ -14,6 +14,7 @@ from concurrent.futures import (
     ProcessPoolExecutor as Executor,
     ThreadPoolExecutor,
 )
+from time import time
 from tqdm import tqdm
 
 import fastremap
@@ -31,9 +32,10 @@ def generate_segmentation_mips(
     output_dir,
     chunk_size=512,
     max_processes=4,
+    max_threads_per_process=8,
+    min_segment_size=0
     projection_depth=512,
     projection_dim=4,
-    max_threads_per_process=8,
 ):
     def submit_job():
         if starts:
@@ -71,7 +73,7 @@ def generate_segmentation_mips(
     util.mkdir(output_dir, delete=True)
     mp = multiprocessing.get_context('spawn')
     with Executor(max_workers=max_processes, mp_context=mp) as executor, \
-         ThreadPoolExecutor(max_workers=4) as writer_executor:
+         ThreadPoolExecutor(max_workers=max_processes) as writer_executor:
         # Start processes
         pending = dict()
         starts = list(dimension_iterator(img.shape()[-1], projection_depth))
@@ -98,7 +100,8 @@ def generate_single_mip(
     z_start,
     chunk_size=512,
     projection_depth=512,
-    max_threads=24
+    max_threads=24,
+    min_segment_size=0,
 ):
     def submit_job():
         """
@@ -119,13 +122,14 @@ def generate_single_mip(
         start : Tuple[int]
             Starting voxel coordinate of image patch to be read.
         """
-        # Get slices
+        # Get image patch
         slices = img_util.get_slices(start, shape)
-        slices_xy = (slices[2], slices[3])
-
-        # Compute MIP
         patch = img.read(slices)
-        np.maximum.reduce(patch, axis=-1, out=mip[slices_xy])
+        if min_segment_size > 0:
+            patch = remove_small_segments(patch, min_segment_size)
+
+        # Compute mip
+        np.maximum.reduce(patch, axis=-1, out=mip[(slices[2], slices[3])])
         return True
 
     # Open image
@@ -145,8 +149,18 @@ def generate_single_mip(
             submit_job()
 
         # Manage threads
+        t0 = time()
+        jobs = list(generate_chunk_starts(img.shape(), chunk_size, z_start))
+        num_jobs = len(jobs)
+        dt = num_jobs // 20
+        t = num_jobs // 20
+        cnt = 0
         while pending:
             thread = next(as_completed(pending, timeout=None))
+            cnt += 1
+            if cnt > t:
+                print(f"Completed {round(cnt / num_jobs, 2)} | Elapsed Time {time() - t0}")
+                t += dt
             pending.remove(thread)
             submit_job()
     return mip
@@ -170,7 +184,6 @@ def reassign_labels(mip, label_mapping):
     mip : numpy.ndarray
         Remapped image with updated labels.
     """
-    mip = remove_small_segments(mip, 256)
     for label in fastremap.unique(mip):
         if label not in label_mapping:
             label_mapping[label] = len(label_mapping)
@@ -268,8 +281,9 @@ def remove_small_segments(label_mask, min_size):
 if __name__ == "__main__":
     # Parameters
     chunk_size = 512
-    max_processes = 6
-    max_threads_per_process = 8
+    max_processes = 1
+    max_threads_per_process = 16
+    min_segment_size = 0
     projection_dim = 4
     projection_depth = 512
 
@@ -283,7 +297,8 @@ if __name__ == "__main__":
         output_dir,
         chunk_size=chunk_size,
         max_processes=max_processes,
+        max_threads_per_process=max_threads_per_process,
+        min_segment_size=min_segment_size,
         projection_depth=projection_depth,
         projection_dim=projection_dim,
-        max_threads_per_process=max_threads_per_process,
     )
