@@ -47,6 +47,7 @@ def generate_segmentation_mips(
                 chunk_size,
                 projection_depth,
                 max_threads_per_process,
+                min_segment_size
             )
             pending[process] = z_start
 
