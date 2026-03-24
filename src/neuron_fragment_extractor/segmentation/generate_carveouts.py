@@ -43,7 +43,7 @@ class CarveOutPipeline:
         chunks=(1, 1, 256, 256, 256),
         downsample_padding=8,
         num_levels=1,
-        num_workers=1,
+        num_workers=32,
         prefetch=128,
         voxel_size=(1.0, 0.748, 0.748),
     ):
