@@ -10,6 +10,7 @@ Code for working with images.
 
 from scipy.ndimage import zoom
 
+import gcsfs
 import json
 import matplotlib.pyplot as plt
 import numpy as np
@@ -246,26 +247,6 @@ def get_datasets(num_levels, voxel_size):
 
 
 # --- Miscellaneous ---
-def resize(img, new_shape):
-    """
-    Resizes a 3D image to the specified new shape using linear interpolation.
-
-    Parameters
-    ----------
-    img : numpy.ndarray
-        Input 3D image array with shape (depth, height, width).
-    new_shape : Tuple[int]
-        Desired output shape as (new_depth, new_height, new_width).
-
-    Returns
-    -------
-    numpy.ndarray
-        Resized 3D image with shape equal to "new_shape".
-    """
-    zoom_factors = np.array(new_shape) / np.array(img.shape)
-    return zoom(img, zoom_factors, order=1, prefilter=False)
-
-
 def find_img_path(bucket_name, root_dir, brain_id):
     """
     Finds the path to a whole-brain dataset stored in a GCS bucket.
@@ -476,3 +457,64 @@ def plot_mips(img, output_path=None, vmax=None):
         axs[i].set_title(axs_names[i], fontsize=16)
         axs[i].set_xticks([])
         axs[i].set_yticks([])
+
+
+def resize(img, new_shape):
+    """
+    Resizes a 3D image to the specified new shape using linear interpolation.
+
+    Parameters
+    ----------
+    img : numpy.ndarray
+        Input 3D image array with shape (depth, height, width).
+    new_shape : Tuple[int]
+        Desired output shape as (new_depth, new_height, new_width).
+
+    Returns
+    -------
+    numpy.ndarray
+        Resized 3D image with shape equal to "new_shape".
+    """
+    zoom_factors = np.array(new_shape) / np.array(img.shape)
+    return zoom(img, zoom_factors, order=1, prefilter=False)
+
+
+def to_voxels(xyz, anisotropy):
+    """
+    Converts the given coordinate from physical to voxel space.
+
+    Parameters
+    ----------
+    xyz : ArrayLike
+        Physical coordinate to be converted to a voxel coordinate.
+    anisotropy : Tuple[float]
+        Image to physical coordinates scaling factors to account for the
+        anisotropy of the microscope.
+
+    Returns
+    -------
+    numpy.ndarray
+        Voxel coordinate.
+    """
+    voxel = xyz / np.array(anisotropy)
+    return np.round(voxel).astype(int)[::-1]
+
+
+def write_zattrs(bucket_name, root_path, num_levels):
+    """
+    Writes the ".zattrs" metadata file for an OME-Zarr dataset to GCS.
+
+    Parameters
+    ----------
+    bucket_name : str
+        Name of the bucket that OME-Zarr dataset is to be written to.
+    root_path : str
+        GCS path to the root of the Zarr directory where ".zattrs" should be
+        written.
+    num_levels : int
+        Number of levels in OME-Zarr dataset.
+    """
+    fs = gcsfs.GCSFileSystem(project=bucket_name)
+    with fs.open(f"{root_path}/.zattrs", "w") as f:
+        zattrs = create_zattrs(num_levels)
+        f.write(json.dumps(zattrs, indent=4))

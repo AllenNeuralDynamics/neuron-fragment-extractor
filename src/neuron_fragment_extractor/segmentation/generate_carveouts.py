@@ -119,7 +119,7 @@ class CarveOutPipeline:
         root_path = os.path.join(self.output_gcs_dir, filename)
         spec = self.get_tensorstore_spec(root_path, level=0)
         dst = TensorStoreImage(spec=spec)
-        self.write_zattrs(root_path)
+        img_util.write_zattrs(bucket_name, root_path, self.num_levels)
 
         # Generate carve-out
         print("Step 2: Generate Image Carve-Out")
@@ -453,21 +453,6 @@ class CarveOutPipeline:
         voxel = [u // 2**level for u in self.graph.node_voxel(node)]
         shape = [s // 2**level + padding for s in self.radial_shape]
         return img_util.get_center_slices(voxel, shape)
-
-    def write_zattrs(self, root_path):
-        """
-        Writes the ".zattrs" metadata file for an OME-Zarr dataset to GCS.
-
-        Parameters
-        ----------
-        root_path : str
-            GCS path to the root of the Zarr directory where ".zattrs" should
-            be written.
-        """
-        fs = gcsfs.GCSFileSystem(project="allen-nd-goog")
-        with fs.open(f"{root_path}/.zattrs", "w") as f:
-            zattrs = img_util.create_zattrs(self.num_levels)
-            f.write(json.dumps(zattrs, indent=4))
 
 
 # --- Helpers ---
