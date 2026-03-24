@@ -518,7 +518,7 @@ def run(
         output_gcs_dir,
         num_levels=num_levels,
     )
-    pipeline("mask.zarr")
+    # pipeline("mask.zarr")  TEMP
     pipeline("input.zarr", src=src)
 
     # Write metadata
