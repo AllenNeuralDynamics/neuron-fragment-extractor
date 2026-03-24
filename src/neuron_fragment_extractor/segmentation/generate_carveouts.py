@@ -517,7 +517,7 @@ def run(
         output_gcs_dir,
         num_levels=num_levels,
     )
-    if create_input
+    if create_input:
         pipeline("input.zarr", src=src)
     if create_mask:
         pipeline("mask.zarr")
