@@ -406,7 +406,7 @@ class CarveOutPipeline:
             Node IDs used to create image carve out.
         """
         centers = list()
-        step_size = self.radial_shape[0] / 4
+        step_size = max(self.radial_shape[0] / 16, 1)
         for nodes in map(list, nx.connected_components(self.graph)):
             root = nodes[0]
             queue = [(root, np.inf)]
