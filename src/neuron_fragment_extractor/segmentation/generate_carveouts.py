@@ -43,7 +43,7 @@ class CarveOutPipeline:
         chunks=(1, 1, 256, 256, 256),
         downsample_padding=8,
         num_levels=1,
-        num_workers=32,
+        num_workers=1,
         prefetch=128,
         voxel_size=(1.0, 0.748, 0.748),
     ):
@@ -273,7 +273,6 @@ class CarveOutPipeline:
             Writes downsampled patch to the destination image.
             """
             patch = np.ones(dst_shape, dtype=np.uint16)
-            pad_dst_shape = [s + self.padding for s in dst_shape]
             while True:
                 # Get slices
                 node = slices_queue.get()
@@ -282,12 +281,9 @@ class CarveOutPipeline:
 
                 # Read and downsample
                 if "input.zarr" in src.path():
-                    read_slices = self.node_to_slices(node, level - 1, True)
+                    read_slices = self.node_to_slices(node, level - 1)
                     patch = src.read(read_slices)
-                    patch = img_util.resize(patch, pad_dst_shape)
-
-                    unpad_slice = slice(self.padding // 2, -self.padding // 2)
-                    patch = patch[(unpad_slice,) * 3].astype(np.uint16)
+                    patch = img_util.downsample_mean_2x(patch).astype(np.uint16)
 
                 # Write
                 write_slices = self.node_to_slices(node, level=level)
@@ -501,12 +497,15 @@ def run(
     output_gcs_dir,
     output_s3_dir,
     num_levels=7,
+    create_input=True,
+    create_mask=True,
     radial_shape=(512, 512, 512),
 ):
     """
     Executes the full image carve-out generation pipeline.
     """
     # Load data
+    assert create_input or create_mask, "Must create something"
     graph = load_skeletons(input_swc_dir, input_swc_names)
     src = TensorStoreImage(input_img_path)
 
@@ -518,8 +517,10 @@ def run(
         output_gcs_dir,
         num_levels=num_levels,
     )
-    # pipeline("mask.zarr")  TEMP
-    pipeline("input.zarr", src=src)
+    if create_input
+        pipeline("input.zarr", src=src)
+    if create_mask:
+        pipeline("mask.zarr")
 
     # Write metadata
     metadata = {
