@@ -117,16 +117,16 @@ class CarveOutPipeline:
         # Create and store the array
         print(f"\nStep 1: Create OME-Zarr with shape={self.img_shape}")
         root_path = os.path.join(self.output_gcs_dir, filename)
-        spec = self.get_tensorstore_spec(root_path, level=0)
-        dst = TensorStoreImage(spec=spec)
-        self.write_zattrs(root_path)
+        #spec = self.get_tensorstore_spec(root_path, level=0)
+        #dst = TensorStoreImage(spec=spec)
+        #self.write_zattrs(root_path)
 
         # Generate carve-out
         print("Step 2: Generate Image Carve-Out")
-        if filename == "mask.zarr":
-            self.generate_mask(dst)
-        else:
-            self.generate_raw(src, dst)
+        #if filename == "mask.zarr":
+        #    self.generate_mask(dst)
+        #else:
+        #    self.generate_raw(src, dst)
 
         # Generate image pyramid
         print("Step 3: Generate Image Pyramid")
