@@ -246,24 +246,16 @@ def get_datasets(num_levels, voxel_size):
 
 
 # --- Miscellaneous ---
-def resize(img, new_shape):
-    """
-    Resizes a 3D image to the specified new shape using linear interpolation.
+def downsample_mean_2x(img):
+    assert img.ndim == 3
+    z, y, x = img.shape
+    assert z % 2 == 0 and y % 2 == 0 and x % 2 == 0
 
-    Parameters
-    ----------
-    img : numpy.ndarray
-        Input 3D image array with shape (depth, height, width).
-    new_shape : Tuple[int]
-        Desired output shape as (new_depth, new_height, new_width).
-
-    Returns
-    -------
-    numpy.ndarray
-        Resized 3D image with shape equal to "new_shape".
-    """
-    zoom_factors = np.array(new_shape) / np.array(img.shape)
-    return zoom(img, zoom_factors, order=1, prefilter=False)
+    return img.reshape(
+        z//2, 2,
+        y//2, 2,
+        x//2, 2
+    ).mean(axis=(1, 3, 5))
 
 
 def find_img_path(bucket_name, root_dir, brain_id):
@@ -476,3 +468,23 @@ def plot_mips(img, output_path=None, vmax=None):
         axs[i].set_title(axs_names[i], fontsize=16)
         axs[i].set_xticks([])
         axs[i].set_yticks([])
+
+
+def resize(img, new_shape):
+    """
+    Resizes a 3D image to the specified new shape using linear interpolation.
+
+    Parameters
+    ----------
+    img : numpy.ndarray
+        Input 3D image array with shape (depth, height, width).
+    new_shape : Tuple[int]
+        Desired output shape as (new_depth, new_height, new_width).
+
+    Returns
+    -------
+    numpy.ndarray
+        Resized 3D image with shape equal to "new_shape".
+    """
+    zoom_factors = np.array(new_shape) / np.array(img.shape)
+    return zoom(img, zoom_factors, order=1, prefilter=False)
